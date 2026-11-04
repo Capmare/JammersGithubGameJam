@@ -85,3 +85,5 @@ compile_commands.json
 
 # Developer folders (personal files of each user)
 **/Content/Developers/*
+**/Content/__ExternalActors__/Developers/
+**/Content/__ExternalObjects__/Developers/
