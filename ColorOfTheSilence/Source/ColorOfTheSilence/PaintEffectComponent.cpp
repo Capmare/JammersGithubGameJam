@@ -11,8 +11,17 @@ namespace
 constexpr float NoLimit = 1000000.0f;
 }
 
+DEFINE_LOG_CATEGORY_STATIC(LogPaintEffect, Log, All);
+
 void UPaintEffectComponent::Start()
 {
+    if (!PaintCollection)
+    {
+        UE_LOG(LogPaintEffect, Warning, TEXT("%s: PaintCollection is not set. The effect cannot start."), *GetNameSafe(GetOwner()));
+        return;
+    }
+
+    UE_LOG(LogPaintEffect, Log, TEXT("%s: Paint effect started."), *GetNameSafe(GetOwner()));
 
     if (GetCurrentRadius() <= 0.0f)
     {
@@ -50,8 +59,8 @@ float UPaintEffectComponent::GetCurrentRadius() const
     // same formula as the shader
     const float speed  = MaxRadius / FMath::Max(Duration, 0.001f);
     const float limit  = bInfinite ? NoLimit : MaxRadius;
-    const float passed = world->GetTimeSeconds() - m_ChangeTime;
-    const float raw    = m_RadiusAtChange + m_Direction * passed * speed;
+    const float passed = world->GetTimeSeconds() - ChangeTime;
+    const float raw    = RadiusAtChange + Direction * passed * speed;
 
     return FMath::Clamp(raw, 0.0f, limit);
 }
@@ -66,13 +75,13 @@ void UPaintEffectComponent::SetDirection(float newDirection)
 
     // save the radius we have now, the shader continues from here
     // this must happen before we change the direction
-    m_RadiusAtChange = GetCurrentRadius();
-    m_ChangeTime     = world->GetTimeSeconds();
-    m_Direction      = newDirection;
+    RadiusAtChange = GetCurrentRadius();
+    ChangeTime     = world->GetTimeSeconds();
+    Direction      = newDirection;
 
-    SetScalar(TEXT("EffectRadiusAtChange"), m_RadiusAtChange);
-    SetScalar(TEXT("EffectChangeTime"), m_ChangeTime);
-    SetScalar(TEXT("EffectDirection"), m_Direction);
+    SetScalar(TEXT("EffectRadiusAtChange"), RadiusAtChange);
+    SetScalar(TEXT("EffectChangeTime"), ChangeTime);
+    SetScalar(TEXT("EffectDirection"), Direction);
 }
 
 void UPaintEffectComponent::SetScalar(FName name, float value)

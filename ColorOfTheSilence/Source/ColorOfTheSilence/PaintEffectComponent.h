@@ -35,8 +35,7 @@ protected:
 
     UPROPERTY(EditAnywhere, Category = "Paint")
     bool bInfinite = false;
-
-
+    
     UPROPERTY(EditAnywhere, Category = "Paint")
     bool bCenterOnPlayer = true;
 
@@ -44,7 +43,7 @@ private:
     void SetDirection(float newDirection);
     void SetScalar(FName name, float value);
 
-    float m_RadiusAtChange = 0.0f;
-    float m_ChangeTime     = 0.0f;
-    float m_Direction      = -1.0f;   // +1 = grows, -1 = shrinks
+    float RadiusAtChange = 0.0f;
+    float ChangeTime     = 0.0f;
+    float Direction      = -1.0f;   // +1 = grows, -1 = shrinks
 };
