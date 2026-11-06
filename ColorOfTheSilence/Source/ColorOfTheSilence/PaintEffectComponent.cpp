@@ -41,11 +41,14 @@ void UPaintEffectComponent::Start()
 
     SetScalar(TEXT("EffectEnabled"), 1.0f);
     SetDirection(1.0f);
+    PaintEffect = EPaintEffect::Enabled;
 }
 
 void UPaintEffectComponent::Reverse()
 {
     SetDirection(-1.0f);
+    PaintEffect = EPaintEffect::Disabled;
+    
 }
 
 float UPaintEffectComponent::GetCurrentRadius() const

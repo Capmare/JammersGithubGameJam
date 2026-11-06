@@ -7,6 +7,12 @@
 
 class UMaterialParameterCollection;
 
+UENUM(BlueprintType)
+enum class EPaintEffect : uint8
+{
+    Enabled,
+    Disabled
+};
 
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class UPaintEffectComponent : public UActorComponent
@@ -22,6 +28,9 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "Paint")
     float GetCurrentRadius() const;
+    
+    UFUNCTION(BlueprintCallable, Category = "Paint")
+    EPaintEffect GetPaintEffect() const { return PaintEffect; }
 
 protected:
     UPROPERTY(EditAnywhere, Category = "Paint")
@@ -43,6 +52,9 @@ private:
     void SetDirection(float newDirection);
     void SetScalar(FName name, float value);
 
+    UPROPERTY(VisibleAnywhere)
+    EPaintEffect PaintEffect = EPaintEffect::Disabled;
+    
     float RadiusAtChange = 0.0f;
     float ChangeTime     = 0.0f;
     float Direction      = -1.0f;   // +1 = grows, -1 = shrinks
