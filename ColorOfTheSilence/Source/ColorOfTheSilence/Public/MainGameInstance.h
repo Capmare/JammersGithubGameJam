@@ -19,6 +19,7 @@ public:
 	UMainGameInstance();
 
 	UDataTable* GetThemeDataTable() override;
+	void RandomizeTheme(int32 Room) override;
 
 protected:
 

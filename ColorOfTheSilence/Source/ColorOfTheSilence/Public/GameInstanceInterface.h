@@ -26,5 +26,7 @@ public:
 	UFUNCTION()
 	virtual UDataTable* GetThemeDataTable() = 0;
 	
+	UFUNCTION()
+	virtual void RandomizeTheme(int32 Room) = 0;
 	
 };
