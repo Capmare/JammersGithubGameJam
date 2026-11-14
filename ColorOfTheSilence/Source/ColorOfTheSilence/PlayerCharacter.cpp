@@ -175,7 +175,7 @@ void APlayerCharacter::TryPickUp()
 
 	if (!TargetActor)
 	{
-		UE_LOG(LogTemp, Log, TEXT("No Pickupable found!"));
+		// UE_LOG(LogTemp, Log, TEXT("No Pickupable found!"));
 		return;
 	}
 
