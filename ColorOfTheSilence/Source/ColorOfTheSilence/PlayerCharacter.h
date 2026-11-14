@@ -1,7 +1,6 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
-
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 #include "PlayerCharacter.generated.h"
@@ -12,6 +11,7 @@ class UCameraComponent;
 class USpringArmComponent;
 class UPaintEffectComponent;
 class UInputMappingContext;
+class USceneComponent;
 
 enum class EPlayerWalkingStatus
 {
@@ -47,6 +47,12 @@ private:
 	void StopSprint();
 	void TogglePaint();
 	void ApplySpeed(float NewSpeed) const;
+
+	AActor* FindPickupCandidate();
+	void TryPickUp();
+	
+	// IPickUpThrowInterface implementation
+	void PickUp(AActor* TargetActor);
 	
 	UPROPERTY(BlueprintReadWrite,EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS")
 	TObjectPtr<UPlayerInputDataAsset> InputReference{};
@@ -70,4 +76,10 @@ private:
 
 	UPROPERTY(BlueprintReadWrite,EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS")
 	float SprintingSpeed{900.f};
+
+	UPROPERTY(BlueprintReadWrite,EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS")
+	float PickUpDistance{600.f};
+
+	UPROPERTY(BlueprintReadWrite,EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS")
+	bool ShowPickUpDebugRay{false};
 };

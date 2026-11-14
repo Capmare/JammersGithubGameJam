@@ -5,5 +5,5 @@
 
 bool UPlayerInputDataAsset::CheckAllBindingsValid()
 {
-	return ensure(Movement) && ensure(Look) && ensure(Sprint) && ensure(Paint);
+	return ensure(Movement) && ensure(Look) && ensure(Sprint) && ensure(Paint) && ensure(Interact);
 }

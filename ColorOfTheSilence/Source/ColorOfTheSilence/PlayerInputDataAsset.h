@@ -30,9 +30,7 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "CotS")
 	TObjectPtr<UInputAction> Paint{};
 	
-	
-	
-	
-	
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "CotS")
+	TObjectPtr<UInputAction> Interact{};
 	
 };

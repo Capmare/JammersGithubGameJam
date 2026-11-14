@@ -11,6 +11,7 @@
 #include "InputActionValue.h"
 #include "InputMappingContext.h"
 #include "PaintEffectComponent.h"
+#include "InteractableInterface.h"
 #include "PlayerInputDataAsset.h"
 
 
@@ -69,6 +70,7 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 	EnhancedInput->BindAction(InputReference->Sprint, ETriggerEvent::Started, this, &APlayerCharacter::StartSprint);
 	EnhancedInput->BindAction(InputReference->Sprint, ETriggerEvent::Completed, this, &APlayerCharacter::StopSprint);
 	EnhancedInput->BindAction(InputReference->Paint, ETriggerEvent::Started, this, &APlayerCharacter::TogglePaint);
+	EnhancedInput->BindAction(InputReference->Interact, ETriggerEvent::Started, this, &APlayerCharacter::TryPickUp);
 }
 
 void APlayerCharacter::ApplyMovementInput(const FInputActionValue& Value)
@@ -106,4 +108,88 @@ void APlayerCharacter::TogglePaint()
 void APlayerCharacter::ApplySpeed(const float NewSpeed) const
 {
 	GetCharacterMovement()->MaxWalkSpeed = NewSpeed;
+}
+
+AActor* APlayerCharacter::FindPickupCandidate()
+{
+	UWorld* World{ GetWorld() };
+	if (!World)
+	{
+		return nullptr;
+	}
+
+	APlayerController* PlayerController{Cast<APlayerController>(GetController())};
+
+	if (!PlayerController)
+	{
+		return nullptr;
+	}
+
+	FVector ViewLocation{};
+	FRotator ViewRotation{};
+
+	PlayerController->GetPlayerViewPoint(ViewLocation, ViewRotation);
+
+	const FVector Start{ViewLocation};
+	const FVector End{Start + ViewRotation.Vector() * PickUpDistance};
+
+	FCollisionQueryParams QueryParams{};
+	QueryParams.AddIgnoredActor(this);
+
+	FHitResult Hit{};
+
+	const bool bHit = World->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, QueryParams);
+
+#if WITH_EDITOR
+	if (ShowPickUpDebugRay)
+	{
+		DrawDebugLine(World, Start, End, bHit ? FColor::Green : FColor::Red, false, 5.0f, 0, 5.0f);
+	}
+#endif
+	
+	if (!bHit)
+	{
+		return nullptr;
+	}
+
+	AActor* HitActor{Hit.GetActor()};
+
+	if (!IsValid(HitActor))
+	{
+		return nullptr;
+	}
+
+	if (!HitActor->GetClass()->ImplementsInterface(UInteractableInterface::StaticClass()))
+	{
+		return nullptr;
+	}
+
+	return HitActor;
+}
+
+void APlayerCharacter::TryPickUp()
+{
+	// UE_LOG(LogTemp, Log, TEXT("Trying Pickup!"));
+	
+	AActor* TargetActor{FindPickupCandidate()};
+
+	if (!TargetActor)
+	{
+		UE_LOG(LogTemp, Log, TEXT("No Pickupable found!"));
+		return;
+	}
+
+	IInteractableInterface::Execute_PickUp(TargetActor, this);
+	PickUp(TargetActor);
+}
+
+// Currently unused, actions can be done here on the player itself
+void APlayerCharacter::PickUp(AActor* TargetActor)
+{
+	if (!IsValid(TargetActor))
+	{
+		return;
+	}
+
+	//UE_LOG(LogTemp, Log, TEXT("Player Picked Up %s"), *TargetActor->GetName());
 }
