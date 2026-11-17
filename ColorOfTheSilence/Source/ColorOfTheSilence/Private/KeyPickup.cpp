@@ -62,5 +62,5 @@ void AKeyPickup::SetSourceSpot(AKeySpot* Spot)
 
 bool AKeyPickup::Collect(AActor* Collector)
 {
-	
+	return true;
 }
