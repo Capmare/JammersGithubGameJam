@@ -11,6 +11,8 @@ class AKeySpot;
 class AKeyPickup;
 class UWorld;
 
+COLOROFTHESILENCE_API DECLARE_LOG_CATEGORY_EXTERN(LogCotS, Log, All);
+
 /** How the game ended. */
 UENUM(BlueprintType)
 enum class EGameOutcome : uint8
@@ -33,6 +35,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnCotSGameLost);
  * Rules:
  * - AKeySpot actors register themself here when they begin play.
  * - On each world begin play, this class picks random spots and spawns keys on them.
+ * - Each spot has a Section number. One section holds at most one key.
  * - The game spawns KeysRequired keys in one run. It spawns no more.
  * - AKeyPickup calls ReportKeyCollected when the player presses the interact key on it.
  * - AHubKeyLock calls ReportKeyPlacedInHub when the player puts a key in it.
@@ -54,7 +57,7 @@ public:
 	UPROPERTY(BlueprintReadWrite, Category = "CotS|Objective")
 	int32 KeysRequired{3};
 
-	UPROPERTY(BlueprintReadWrite, Category = "CotS|Objective")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CotS|Objective")
 	TSubclassOf<AKeyPickup> DefaultPickupClass{};
 
 	UPROPERTY(BlueprintReadWrite, Category = "CotS|Objective")
@@ -84,6 +87,9 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "CotS|Objective")
 	bool IsSpotActive(const AKeySpot* Spot) const;
 
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "CotS|Objective")
+	bool IsSectionActive(int32 Section) const;
+
 	UFUNCTION(BlueprintCallable, Category = "CotS|Objective")
 	void SpawnKeysForRegisteredSpots();
 
@@ -100,6 +106,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "CotS|Objective")
 	void ResetObjectives();
+
+	UFUNCTION(BlueprintCallable, Category = "CotS|Objective")
+	void LogObjectiveState() const;
 
 
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "CotS|Objective")
