@@ -8,6 +8,8 @@
 #include "Engine/World.h"
 #include "TimerManager.h"
 
+DEFINE_LOG_CATEGORY(LogCotS);
+
 UCotSObjectiveSubsystem* UCotSObjectiveSubsystem::Get(const UObject* WorldContextObject)
 {
 	if (!WorldContextObject) return nullptr;
@@ -20,6 +22,9 @@ UCotSObjectiveSubsystem* UCotSObjectiveSubsystem::Get(const UObject* WorldContex
 void UCotSObjectiveSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
+
+	UE_LOG(LogCotS, Log, TEXT("Objective subsystem is ready. Keys required: %d | default key class: %s"),
+		KeysRequired, DefaultPickupClass ? *DefaultPickupClass->GetName() : TEXT("None"));
 }
 
 void UCotSObjectiveSubsystem::Deinitialize()
@@ -45,6 +50,7 @@ void UCotSObjectiveSubsystem::ScheduleRoll(UWorld* World)
 
 	RollWorld = World;
 	RollTimerHandle = TimerManager.SetTimerForNextTick(FTimerDelegate::CreateUObject(this, &UCotSObjectiveSubsystem::SpawnKeysForRegisteredSpots));
+	UE_LOG(LogCotS, Verbose, TEXT("Key roll scheduled for the next tick in world '%s'."), *World->GetName());
 }
 
 void UCotSObjectiveSubsystem::RegisterKeySpot(AKeySpot* Spot)
@@ -55,6 +61,8 @@ void UCotSObjectiveSubsystem::RegisterKeySpot(AKeySpot* Spot)
 
 	if (ContainsSpot(RegisteredSpots, Spot)) return;
 	RegisteredSpots.Add(Spot);
+
+	UE_LOG(LogCotS, Verbose, TEXT("KeySpot '%s' registered. Registered spots: %d"), *Spot->GetName(), RegisteredSpots.Num());
 
 	if (RolledWorld.Get() == Spot->GetWorld()) SpawnKeysForRegisteredSpots();
 	else ScheduleRoll(Spot->GetWorld());
@@ -72,6 +80,15 @@ bool UCotSObjectiveSubsystem::IsSpotActive(const AKeySpot* Spot) const
 	return ContainsSpot(ActiveSpots, Spot);
 }
 
+bool UCotSObjectiveSubsystem::IsSectionActive(const int32 Section) const
+{
+	return ActiveSpots.ContainsByPredicate([Section](const TWeakObjectPtr<AKeySpot>& WeakSpot)
+	{
+		const AKeySpot* Spot{WeakSpot.Get()};
+		return Spot && Spot->GetSection() == Section;
+	});
+}
+
 void UCotSObjectiveSubsystem::SpawnKeysForRegisteredSpots()
 {
 	PruneDeadSpots();
@@ -85,14 +102,26 @@ void UCotSObjectiveSubsystem::SpawnKeysForRegisteredSpots()
 
 	const int32 Budget{GetUnspawnedKeyCount()};
 	RolledWorld = GetWorld();
-	if (Budget <= 0) return;
+	if (Budget <= 0)
+	{
+		UE_LOG(LogCotS, Log, TEXT("Key roll skipped. Keys required: %d | keys already spawned: %d. Call Reset Objectives to spawn keys again."),
+			KeysRequired, KeysSpawned);
+		return;
+	}
 
 	TArray<AKeySpot*> Candidates;
 	Candidates.Reserve(RegisteredSpots.Num());
 	for (const TWeakObjectPtr<AKeySpot>& WeakSpot : RegisteredSpots)
 	{
 		AKeySpot* Spot{WeakSpot.Get()};
-		if (Spot && !IsSpotActive(Spot)) Candidates.Add(Spot);
+		if (Spot && !IsSpotActive(Spot) && !IsSectionActive(Spot->GetSection())) Candidates.Add(Spot);
+	}
+
+	if (Candidates.Num() == 0)
+	{
+		UE_LOG(LogCotS, Warning, TEXT("Key roll found no free KeySpot. Registered spots: %d | spots that already hold a key: %d. Place more KeySpot actors, or call Reset Objectives."),
+			RegisteredSpots.Num(), ActiveSpots.Num());
+		return;
 	}
 
 	// Shuffle the spots, then take the first ones. This gives a random key set.
@@ -102,10 +131,30 @@ void UCotSObjectiveSubsystem::SpawnKeysForRegisteredSpots()
 		Candidates.Swap(Index, SwapIndex);
 	}
 
+	// The list is shuffled, so the first spot of each section is a random spot of that section.
+	TSet<int32> UsedSections;
 	const int32 Count{FMath::Min(Budget, Candidates.Num())};
-	for (int32 Index{}; Index < Count; ++Index)
+	int32 Spawned{};
+	for (AKeySpot* Spot : Candidates)
 	{
-		if (ActivateSpot(Candidates[Index])) ++KeysSpawned;
+		if (Spawned >= Budget) break;
+		if (UsedSections.Contains(Spot->GetSection())) continue;
+
+		if (ActivateSpot(Spot))
+		{
+			UsedSections.Add(Spot->GetSection());
+			++KeysSpawned;
+			++Spawned;
+		}
+	}
+
+	UE_LOG(LogCotS, Log, TEXT("Key roll: registered spots: %d | free spots: %d | max keys: %d | spawned: %d | total spawned: %d | keys required: %d | seed: %d"),
+		RegisteredSpots.Num(), Candidates.Num(), Count, Spawned, KeysSpawned, KeysRequired, UsedSeed);
+
+	if (Spawned < Count)
+	{
+		UE_LOG(LogCotS, Warning, TEXT("Key roll could only spawn %d of %d keys. Check 'Pickup Class' on the KeySpot and 'Default Pickup Class' on this subsystem."),
+			Spawned, Count);
 	}
 }
 
@@ -122,9 +171,16 @@ bool UCotSObjectiveSubsystem::ActivateSpot(AKeySpot* Spot)
 
 bool UCotSObjectiveSubsystem::ReportKeyCollected(const AKeyPickup* Key)
 {
-	if (!Key || bGameFinished) return false;
+	if (!Key) return false;
+
+	if (bGameFinished)
+	{
+		UE_LOG(LogCotS, Log, TEXT("Key '%s' was not counted. The game is over."), *Key->GetName());
+		return false;
+	}
 
 	++CollectedKeys;
+	UE_LOG(LogCotS, Log, TEXT("Key counted: %d / %d"), CollectedKeys, KeysRequired);
 	OnKeyCollected.Broadcast(CollectedKeys, KeysRequired);
 	return true;
 }
@@ -132,9 +188,14 @@ bool UCotSObjectiveSubsystem::ReportKeyCollected(const AKeyPickup* Key)
 bool UCotSObjectiveSubsystem::ReportKeyPlacedInHub()
 {
 	if (bGameFinished) return false;
-	if (GetHeldKeyCount() <= 0) return false;
+	if (GetHeldKeyCount() <= 0)
+	{
+		UE_LOG(LogCotS, Log, TEXT("The hub lock rejected the key. The player holds no key. Collected: %d | placed: %d"), CollectedKeys, PlacedKeys);
+		return false;
+	}
 
 	++PlacedKeys;
+	UE_LOG(LogCotS, Log, TEXT("Key placed in hub: %d / %d"), PlacedKeys, KeysRequired);
 	OnKeyPlacedInHub.Broadcast(PlacedKeys, KeysRequired);
 
 	if (PlacedKeys >= KeysRequired)
@@ -153,6 +214,7 @@ void UCotSObjectiveSubsystem::ReportPlayerCaught()
 
 	bGameFinished = true;
 	Outcome = EGameOutcome::Lost;
+	UE_LOG(LogCotS, Log, TEXT("Game over: the player was caught."));
 	OnGameLost.Broadcast();
 }
 
@@ -173,7 +235,35 @@ void UCotSObjectiveSubsystem::ResetObjectives()
 		if (AKeySpot* Spot{WeakSpot.Get()}) Spot->ClearSpawnedKey();
 	}
 
+	UE_LOG(LogCotS, Log, TEXT("Objectives reset. Registered spots: %d"), RegisteredSpots.Num());
 	SpawnKeysForRegisteredSpots();
+}
+
+void UCotSObjectiveSubsystem::LogObjectiveState() const
+{
+	int32 LiveSpots{};
+	for (const TWeakObjectPtr<AKeySpot>& WeakSpot : RegisteredSpots)
+	{
+		if (WeakSpot.IsValid()) ++LiveSpots;
+	}
+
+	UE_LOG(LogCotS, Log, TEXT("Objective state | world: %s | registered KeySpot actors: %d | spots with a key: %d | keys spawned: %d | keys required: %d | collected: %d | placed in hub: %d | held by player: %d | game finished: %d | outcome: %s | default key class: %s"),
+		GetWorld() ? *GetWorld()->GetName() : TEXT("None"),
+		LiveSpots,
+		ActiveSpots.Num(),
+		KeysSpawned,
+		KeysRequired,
+		CollectedKeys,
+		PlacedKeys,
+		GetHeldKeyCount(),
+		bGameFinished ? 1 : 0,
+		*UEnum::GetValueAsString(Outcome),
+		DefaultPickupClass ? *DefaultPickupClass->GetName() : TEXT("None"));
+
+	if (LiveSpots == 0)
+	{
+		UE_LOG(LogCotS, Warning, TEXT("No KeySpot actor registered. Place a KeySpot actor in the active level, and check that the level is loaded."));
+	}
 }
 
 void UCotSObjectiveSubsystem::PruneDeadSpots()

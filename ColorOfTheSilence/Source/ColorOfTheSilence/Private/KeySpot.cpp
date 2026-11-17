@@ -38,27 +38,40 @@ void AKeySpot::EndPlay(const EEndPlayReason::Type Reason)
 
 AKeyPickup* AKeySpot::SpawnKey(const TSubclassOf<AKeyPickup> FallbackClass)
 {
-	if (SpawnedKey) return SpawnedKey;
+	if (SpawnedKey)
+	{
+		UE_LOG(LogCotS, Verbose, TEXT("KeySpot '%s' already holds the key '%s'."), *GetName(), *SpawnedKey->GetName());
+		return SpawnedKey;
+	}
 
 	const TSubclassOf<AKeyPickup> Class{PickupClass ? PickupClass : FallbackClass};
-	if (!Class) return nullptr;
+	if (!Class)
+	{
+		UE_LOG(LogCotS, Warning, TEXT("KeySpot '%s' has no key class. Set 'Pickup Class' on this KeySpot, or 'Default Pickup Class' on the objective subsystem."), *GetName());
+		return nullptr;
+	}
 
 	UWorld* World{GetWorld()};
-	if (!World) return nullptr;
+	if (!World)
+	{
+		UE_LOG(LogCotS, Warning, TEXT("KeySpot '%s' has no world. It cannot spawn a key."), *GetName());
+		return nullptr;
+	}
 
 	FActorSpawnParameters Params;
 	Params.Owner = this;
 	Params.Instigator = nullptr;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
-	SpawnedKey = World->SpawnActor<AKeyPickup>(GetActorLocation() + SpawnOffset, GetActorRotation() + SpawnRotation, Params);
+	SpawnedKey = World->SpawnActor<AKeyPickup>(Class, GetActorLocation() + SpawnOffset, GetActorRotation() + SpawnRotation, Params);
 	if (!SpawnedKey)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("KeySpot '%s' could not spawn its key."), *GetName());
+		UE_LOG(LogCotS, Warning, TEXT("KeySpot '%s' could not spawn its key."), *GetName());
 		return nullptr;
 	}
 
 	SpawnedKey->SetSourceSpot(this);
+	UE_LOG(LogCotS, Log, TEXT("KeySpot '%s' spawned the key '%s' with the class '%s'."), *GetName(), *SpawnedKey->GetName(), *Class->GetName());
 	return SpawnedKey;
 }
 

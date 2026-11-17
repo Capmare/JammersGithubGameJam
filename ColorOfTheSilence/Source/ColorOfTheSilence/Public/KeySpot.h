@@ -28,6 +28,9 @@ public:
 	AKeyPickup* GetSpawnedKey() const { return SpawnedKey; }
 
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "CotS")
+	int32 GetSection() const { return Section; }
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "CotS")
 	bool HasKey() const { return SpawnedKey != nullptr; }
 
 protected:
@@ -43,8 +46,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CotS", meta = (AllowPrivateAccess = "true"))
 	TSubclassOf<AKeyPickup> PickupClass{};
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CotS", meta = (AllowPrivateAccess = "true", Description = "Name of the game section. Not used by the random pick yet."))
-	FName Section{};
+	/** Spots with the same number form one section. Each section holds at most one key. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CotS", meta = (AllowPrivateAccess = "true"))
+	int32 Section{};
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CotS", meta = (AllowPrivateAccess = "true"))
 	FVector SpawnOffset{};
