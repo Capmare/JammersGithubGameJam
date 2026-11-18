@@ -21,9 +21,10 @@ void ABaseProceduralActor::GenerateRandomMesh(FName CurrentTheme)
 		{
 			if (Mesh)
 			{
-				UStaticMeshComponent* NewMeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("NewMeshComponent"));
+				UStaticMeshComponent* NewMeshComponent = NewObject<UStaticMeshComponent>(this, TEXT("NewMeshComponent"));
 				NewMeshComponent->SetStaticMesh(Mesh);
-				NewMeshComponent->SetupAttachment(RootComponent);
+				NewMeshComponent->RegisterComponent();
+				NewMeshComponent->AttachToComponent(RootComponent, FAttachmentTransformRules::KeepRelativeTransform);
 				MeshComponents.Add(NewMeshComponent);
 			}
 		}
@@ -31,9 +32,10 @@ void ABaseProceduralActor::GenerateRandomMesh(FName CurrentTheme)
 	}
 	FThemeData ThemeData = UDataTableUtility::GetThemeData(this, CurrentTheme);
 	int32 RandomIndex = FMath::RandRange(0, ThemeData.PossibleAssets.Max() - 1);
-	UStaticMeshComponent* NewMeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("NewMeshComponent"));
+	UStaticMeshComponent* NewMeshComponent = NewObject<UStaticMeshComponent>(this, TEXT("NewMeshComponent"));
 	NewMeshComponent->SetStaticMesh(ThemeData.PossibleAssets[RandomIndex]);
-	NewMeshComponent->SetupAttachment(RootComponent);
+	NewMeshComponent->RegisterComponent();
+	NewMeshComponent->AttachToComponent(RootComponent, FAttachmentTransformRules::KeepRelativeTransform);
 	MeshComponents.Add(NewMeshComponent);
 }
 

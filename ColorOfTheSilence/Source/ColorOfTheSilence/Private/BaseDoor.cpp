@@ -2,6 +2,7 @@
 
 
 #include "BaseDoor.h"
+#include "GameInstanceInterface.h"
 
 // Sets default values
 ABaseDoor::ABaseDoor()
@@ -9,6 +10,11 @@ ABaseDoor::ABaseDoor()
  	// Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
 
+}
+
+void ABaseDoor::PickUp_Implementation(AActor* Interactor)
+{
+	Cast<IGameInstanceInterface>(GetGameInstance())->RandomizeTheme(AssociatedRoom);
 }
 
 // Called when the game starts or when spawned

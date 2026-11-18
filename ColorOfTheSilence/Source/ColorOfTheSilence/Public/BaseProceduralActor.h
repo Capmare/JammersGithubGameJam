@@ -25,10 +25,10 @@ public:
 	// Sets default values for this actor's properties
 	ABaseProceduralActor();
 
-	UPROPERTY(EditDefaultsOnly, Category = "Procedural Generation")
+	UPROPERTY(EditAnywhere, Category = "Procedural Generation")
 	int32 Room = 0;
 
-	UPROPERTY(EditDefaultsOnly, Category = "Procedural Generation", meta = (Description = "Overrides the default mesh generation, if not set, a random mesh will be generated"))
+	UPROPERTY(EditAnywhere, Category = "Procedural Generation", meta = (Description = "Overrides the default mesh generation, if not set, a random mesh will be generated"))
 	TMap<FName, FStaticMeshArray> ThemeMeshOverrides;
 
 	UFUNCTION(BlueprintCallable, Category = "Procedural Generation")
