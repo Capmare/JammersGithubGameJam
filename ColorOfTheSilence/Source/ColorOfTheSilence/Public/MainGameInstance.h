@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Engine/GameInstance.h"
 #include "GameInstanceInterface.h"
+#include "GameFramework/SaveGame.h"
 #include "MainGameInstance.generated.h"
 
 /**
@@ -21,9 +22,17 @@ public:
 	UDataTable* GetThemeDataTable() override;
 	void RandomizeTheme(int32 Room) override;
 
+	UFUNCTION(BlueprintCallable, Category = "SaveGame")
+	void SaveGame(FString SaveSlotName);
+
+	UFUNCTION(BlueprintCallable, Category = "SaveGame")
+	void LoadGame(FString SaveSlotName);
+
 protected:
 
 	UPROPERTY(EditDefaultsOnly)
 	class UDataTable* ThemeDataTable;
 
+	UFUNCTION()
+	void OnGameLoaded(const FString& SlotName, const int32 UserIndex, USaveGame* LoadedGameData);
 };

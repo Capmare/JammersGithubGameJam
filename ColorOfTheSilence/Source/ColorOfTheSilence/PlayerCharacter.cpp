@@ -191,5 +191,7 @@ void APlayerCharacter::PickUp(AActor* TargetActor)
 		return;
 	}
 
+	HeldItem = TargetActor;
+
 	//UE_LOG(LogTemp, Log, TEXT("Player Picked Up %s"), *TargetActor->GetName());
 }

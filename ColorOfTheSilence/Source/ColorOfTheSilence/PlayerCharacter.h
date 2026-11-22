@@ -3,6 +3,7 @@
 #pragma once
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+#include "PlayerCharacterInterface.h"
 #include "PlayerCharacter.generated.h"
 
 struct FInputActionValue;
@@ -21,7 +22,7 @@ enum class EPlayerWalkingStatus
 };
 
 UCLASS()
-class COLOROFTHESILENCE_API APlayerCharacter : public ACharacter
+class COLOROFTHESILENCE_API APlayerCharacter : public ACharacter, public IPlayerCharacterInterface
 {
 	GENERATED_BODY()
 
@@ -39,6 +40,8 @@ public:
 
 	// Called to bind functionality to input
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+
+	virtual AActor* GetHeldItem() override { return HeldItem; }
 	
 private:
 	void ApplyMovementInput(const FInputActionValue& Value);
@@ -52,7 +55,10 @@ private:
 	void TryPickUp();
 	
 	// IPickUpThrowInterface implementation
-	void PickUp(AActor* TargetActor);
+	virtual void PickUp(AActor* TargetActor) override;
+
+	UPROPERTY()
+	AActor* HeldItem{ nullptr };
 	
 	UPROPERTY(BlueprintReadWrite,EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS")
 	TObjectPtr<UPlayerInputDataAsset> InputReference{};

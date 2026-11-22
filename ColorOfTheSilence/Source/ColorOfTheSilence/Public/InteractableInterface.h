@@ -25,4 +25,6 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Cots|Interaction")
 	void PickUp(AActor* Interactor);
+
+	virtual bool ShouldBeSaved() const { return true; }
 };
