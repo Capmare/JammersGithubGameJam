@@ -13,6 +13,7 @@ class USpringArmComponent;
 class UPaintEffectComponent;
 class UInputMappingContext;
 class USceneComponent;
+class USoundBase;
 
 enum class EPlayerWalkingStatus
 {
@@ -48,6 +49,11 @@ private:
 	void ApplyLookInput(const FInputActionValue& Value);
 	void StartSprint();
 	void StopSprint();
+	void StartCalm();
+	void StopCalm();
+	void UpdateStamina(float DeltaTime);
+	void UpdateHeartbeat(float DeltaTime);
+	bool CanSprint() const { return !bExhausted && !bCalm; }
 	void TogglePaint();
 	void ApplySpeed(float NewSpeed) const;
 
@@ -70,6 +76,11 @@ private:
 	TObjectPtr<UPaintEffectComponent> PaintEffect{};
 
 	bool bPaintActive{};
+	bool bSprintHeld{};
+	bool bCalm{};
+	bool bExhausted{};
+	float Stamina{};
+	float HeartbeatTimer{};
 	
 	UPROPERTY(BlueprintReadWrite,EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS")
 	TObjectPtr<UCameraComponent> PlayerCamera{};
@@ -88,4 +99,35 @@ private:
 
 	UPROPERTY(BlueprintReadWrite,EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS")
 	bool ShowPickUpDebugRay{false};
+
+	// Plays once per beat. Use a single beat, not a loop.
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS|Heartbeat")
+	TObjectPtr<USoundBase> HeartbeatSound{};
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0.05"), Category = "CotS|Heartbeat")
+	float SlowestBeatInterval{1.2f};
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0.05"), Category = "CotS|Heartbeat")
+	float FastestBeatInterval{0.35f};
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="1"), Category = "CotS|Heartbeat")
+	float MonsterFearDistance{2500.f};
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0", ClampMax="1"), Category = "CotS|Heartbeat")
+	float CalmIntensityScale{0.3f};
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="1"), Category = "CotS|Stamina")
+	float MaxStamina{100.f};
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0"), Category = "CotS|Stamina")
+	float StaminaDrainPerSecond{25.f};
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0"), Category = "CotS|Stamina")
+	float StaminaRegenPerSecond{15.f};
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="1"), Category = "CotS|Stamina")
+	float CalmRegenMultiplier{3.f};
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0"), Category = "CotS|Stamina")
+	float SprintResumeStamina{30.f};
 };

@@ -21,6 +21,8 @@ bool FPlayerInputAssetValidTest::RunTest(const FString& Parameters)
 	Asset->Look = NewObject<UInputAction>();
 	Asset->Sprint = NewObject<UInputAction>();
 	Asset->Paint = NewObject<UInputAction>();
+	Asset->Interact = NewObject<UInputAction>();
+	Asset->Calm = NewObject<UInputAction>();
 
 	TestTrue(TEXT("All actions set is valid"), Asset->CheckAllBindingsValid());
 	return true;

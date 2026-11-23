@@ -32,5 +32,8 @@ public:
 	
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "CotS")
 	TObjectPtr<UInputAction> Interact{};
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "CotS")
+	TObjectPtr<UInputAction> Calm{};
 	
 };
