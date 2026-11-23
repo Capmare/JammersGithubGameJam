@@ -37,6 +37,7 @@ void AHubKeyLock::PickUp_Implementation(AActor* Interactor)
 	}
 
 	UCotSObjectiveSubsystem* Subsystem{UCotSObjectiveSubsystem::Get(this)};
+	if (Subsystem) Subsystem->SetHubLocation(GetActorLocation());
 	if (!Subsystem || !Subsystem->ReportKeyPlacedInHub())
 	{
 		UE_LOG(LogCotS, Log, TEXT("Hub lock '%s' rejects the key. The objective subsystem refused it."), *GetName());

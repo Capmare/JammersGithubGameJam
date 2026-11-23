@@ -9,6 +9,7 @@
 
 class AKeySpot;
 class AKeyPickup;
+class AHidingSpot;
 class UWorld;
 
 COLOROFTHESILENCE_API DECLARE_LOG_CATEGORY_EXTERN(LogCotS, Log, All);
@@ -63,6 +64,15 @@ public:
 	UPROPERTY(BlueprintReadWrite, Category = "CotS|Objective")
 	int32 RandomSeed{-1};
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CotS|Objective", meta = (ClampMin = "0"))
+	float KeyCollectedHintStrength{1.f};
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CotS|Objective", meta = (ClampMin = "0"))
+	float KeyPlacedHintStrength{1.f};
+
+	UFUNCTION(BlueprintCallable, Category = "CotS|Objective")
+	void SetHubLocation(FVector Location) { HubLocation = Location; bHasHubLocation = true; }
+
 
 	// Bindings
 	UPROPERTY(BlueprintAssignable, Category = "CotS|Objective")
@@ -86,6 +96,18 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "CotS|Objective")
 	bool IsSpotActive(const AKeySpot* Spot) const;
+
+	UFUNCTION(BlueprintCallable, Category = "CotS|Objective")
+	void RegisterHidingSpot(AHidingSpot* Spot);
+
+	UFUNCTION(BlueprintCallable, Category = "CotS|Objective")
+	void UnregisterHidingSpot(const AHidingSpot* Spot);
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "CotS|Objective")
+	TArray<int32> GetHidingSpotSections() const;
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "CotS|Objective")
+	TArray<AHidingSpot*> GetHidingSpotsInSection(int32 Section) const;
 
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "CotS|Objective")
 	bool IsSectionActive(int32 Section) const;
@@ -138,6 +160,9 @@ private:
 	bool ActivateSpot(AKeySpot* Spot);
 	bool ContainsSpot(const TArray<TWeakObjectPtr<AKeySpot>>& List, const AKeySpot* Spot) const;
 
+	FVector HubLocation{FVector::ZeroVector};
+	bool bHasHubLocation{};
+
 	bool bGameFinished{};
 	EGameOutcome Outcome{EGameOutcome::None};
 
@@ -153,4 +178,5 @@ private:
 
 	TArray<TWeakObjectPtr<AKeySpot>> RegisteredSpots;
 	TArray<TWeakObjectPtr<AKeySpot>> ActiveSpots;
+	TArray<TWeakObjectPtr<AHidingSpot>> HidingSpots;
 };
