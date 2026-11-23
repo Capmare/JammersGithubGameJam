@@ -5,6 +5,7 @@
 
 #include "CotSObjectiveSubsystem.h"
 #include "KeyPickup.h"
+#include "SectionVolume.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
@@ -25,6 +26,8 @@ AKeySpot::AKeySpot()
 void AKeySpot::BeginPlay()
 {
 	Super::BeginPlay();
+
+	ASectionVolume::AssignSectionFromVolume(*this, Section);
 
 	if (UCotSObjectiveSubsystem* Subsystem{UCotSObjectiveSubsystem::Get(this)}) Subsystem->RegisterKeySpot(this);
 }

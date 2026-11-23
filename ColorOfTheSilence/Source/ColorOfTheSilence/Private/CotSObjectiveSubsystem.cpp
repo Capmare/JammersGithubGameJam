@@ -3,6 +3,8 @@
 
 #include "CotSObjectiveSubsystem.h"
 
+#include "CotSMonsterDirector.h"
+#include "HidingSpot.h"
 #include "KeyPickup.h"
 #include "KeySpot.h"
 #include "Engine/World.h"
@@ -35,6 +37,7 @@ void UCotSObjectiveSubsystem::Deinitialize()
 
 	RegisteredSpots.Empty();
 	ActiveSpots.Empty();
+	HidingSpots.Empty();
 
 	Super::Deinitialize();
 }
@@ -78,6 +81,41 @@ void UCotSObjectiveSubsystem::UnregisterKeySpot(const AKeySpot* Spot)
 bool UCotSObjectiveSubsystem::IsSpotActive(const AKeySpot* Spot) const
 {
 	return ContainsSpot(ActiveSpots, Spot);
+}
+
+void UCotSObjectiveSubsystem::RegisterHidingSpot(AHidingSpot* Spot)
+{
+	if (!Spot) return;
+
+	HidingSpots.RemoveAll([](const TWeakObjectPtr<AHidingSpot>& WeakSpot) { return !WeakSpot.IsValid(); });
+	HidingSpots.AddUnique(Spot);
+	UE_LOG(LogCotS, Verbose, TEXT("HidingSpot '%s' registered in section %d. Hiding spots: %d"), *Spot->GetName(), Spot->GetSection(), HidingSpots.Num());
+}
+
+void UCotSObjectiveSubsystem::UnregisterHidingSpot(const AHidingSpot* Spot)
+{
+	HidingSpots.RemoveAll([Spot](const TWeakObjectPtr<AHidingSpot>& WeakSpot) { return !WeakSpot.IsValid() || WeakSpot.Get() == Spot; });
+}
+
+TArray<int32> UCotSObjectiveSubsystem::GetHidingSpotSections() const
+{
+	TArray<int32> Result;
+	for (const TWeakObjectPtr<AHidingSpot>& WeakSpot : HidingSpots)
+	{
+		if (const AHidingSpot* Spot{WeakSpot.Get()}) Result.AddUnique(Spot->GetSection());
+	}
+	return Result;
+}
+
+TArray<AHidingSpot*> UCotSObjectiveSubsystem::GetHidingSpotsInSection(const int32 Section) const
+{
+	TArray<AHidingSpot*> Result;
+	for (const TWeakObjectPtr<AHidingSpot>& WeakSpot : HidingSpots)
+	{
+		AHidingSpot* Spot{WeakSpot.Get()};
+		if (Spot && Spot->GetSection() == Section) Result.Add(Spot);
+	}
+	return Result;
 }
 
 bool UCotSObjectiveSubsystem::IsSectionActive(const int32 Section) const
@@ -181,6 +219,10 @@ bool UCotSObjectiveSubsystem::ReportKeyCollected(const AKeyPickup* Key)
 
 	++CollectedKeys;
 	UE_LOG(LogCotS, Log, TEXT("Key counted: %d / %d"), CollectedKeys, KeysRequired);
+	if (KeyCollectedHintStrength > 0.f)
+	{
+		UCotSMonsterDirector::SendHint(this, Key->GetActorLocation(), KeyCollectedHintStrength, TEXT("KeyCollected"));
+	}
 	OnKeyCollected.Broadcast(CollectedKeys, KeysRequired);
 	return true;
 }
@@ -196,6 +238,10 @@ bool UCotSObjectiveSubsystem::ReportKeyPlacedInHub()
 
 	++PlacedKeys;
 	UE_LOG(LogCotS, Log, TEXT("Key placed in hub: %d / %d"), PlacedKeys, KeysRequired);
+	if (KeyPlacedHintStrength > 0.f && bHasHubLocation)
+	{
+		UCotSMonsterDirector::SendHint(this, HubLocation, KeyPlacedHintStrength, TEXT("KeyPlaced"));
+	}
 	OnKeyPlacedInHub.Broadcast(PlacedKeys, KeysRequired);
 
 	if (PlacedKeys >= KeysRequired)
