@@ -34,6 +34,7 @@ void UCotSObjectiveSubsystem::Deinitialize()
 	if (UWorld* World{RollWorld.Get()}) World->GetTimerManager().ClearTimer(RollTimerHandle);
 	RollWorld.Reset();
 	RolledWorld.Reset();
+	bRandomizerSeeded = false;
 
 	RegisteredSpots.Empty();
 	ActiveSpots.Empty();
@@ -132,8 +133,9 @@ void UCotSObjectiveSubsystem::SpawnKeysForRegisteredSpots()
 	PruneDeadSpots();
 
 	// A new seed replaces the old one. This keeps the -1 case random and a set seed repeatable.
-	if (RandomSeed != UsedSeed)
+	if (NeedsReseed(bRandomizerSeeded, RandomSeed, UsedSeed))
 	{
+		bRandomizerSeeded = true;
 		UsedSeed = RandomSeed;
 		SpotRandomizer.Initialize(RandomSeed >= 0 ? RandomSeed : FMath::Rand());
 	}

@@ -35,5 +35,17 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "CotS")
 	TObjectPtr<UInputAction> Calm{};
+
+	// Hold to aim
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "CotS")
+	TObjectPtr<UInputAction> Aim{};
+
+	// Press while aiming to throw
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "CotS")
+	TObjectPtr<UInputAction> Throw{};
+
+	// Press to crouch or stand up
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "CotS")
+	TObjectPtr<UInputAction> Crouch{};
 	
 };

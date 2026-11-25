@@ -50,6 +50,8 @@ class COLOROFTHESILENCE_API UCotSObjectiveSubsystem : public UGameInstanceSubsys
 public:
 	static UCotSObjectiveSubsystem* Get(const UObject* WorldContextObject);
 
+	static bool NeedsReseed(bool bSeeded, int32 RequestedSeed, int32 LastSeed) { return !bSeeded || RequestedSeed != LastSeed; }
+
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
 
@@ -172,6 +174,7 @@ private:
 
 	FRandomStream SpotRandomizer{};
 	int32 UsedSeed{INDEX_NONE};
+	bool bRandomizerSeeded{};
 	FTimerHandle RollTimerHandle{};
 	TWeakObjectPtr<UWorld> RollWorld{};
 	TWeakObjectPtr<UWorld> RolledWorld{};

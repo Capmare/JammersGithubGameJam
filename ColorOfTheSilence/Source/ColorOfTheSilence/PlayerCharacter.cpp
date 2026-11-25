@@ -3,7 +3,10 @@
 
 #include "PlayerCharacter.h"
 
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
 #include "Camera/CameraComponent.h"
+#include "Components/PrimitiveComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -13,8 +16,10 @@
 #include "PaintEffectComponent.h"
 #include "InteractableInterface.h"
 #include "PlayerInputDataAsset.h"
+#include "ThrowablePickup.h"
 #include "CotSMonsterDirector.h"
 #include "Kismet/GameplayStatics.h"
+#include "DrawDebugHelpers.h"
 
 
 APlayerCharacter::APlayerCharacter()
@@ -24,6 +29,8 @@ APlayerCharacter::APlayerCharacter()
 	bUseControllerRotationYaw = true;
 	GetCharacterMovement()->bOrientRotationToMovement = false;
 	GetCharacterMovement()->MaxWalkSpeed = WalkingSpeed;
+	GetCharacterMovement()->NavAgentProps.bCanCrouch = true;
+	GetCharacterMovement()->MaxWalkSpeedCrouched = CrouchingSpeed;
 
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	CameraBoom->SetupAttachment(RootComponent);
@@ -44,6 +51,9 @@ void APlayerCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 
+	GetCharacterMovement()->MaxWalkSpeedCrouched = CrouchingSpeed;
+	DefaultFieldOfView = PlayerCamera->FieldOfView;
+	DefaultArmLength = CameraBoom->TargetArmLength;
 	ApplySpeed(WalkingSpeed);
 	Stamina = MaxStamina;
 
@@ -62,6 +72,55 @@ void APlayerCharacter::Tick(float DeltaTime)
 
 	UpdateStamina(DeltaTime);
 	UpdateHeartbeat(DeltaTime);
+	if (bAiming)
+	{
+		// Zeroes only X and Y so gravity still works
+		FVector& Velocity{GetCharacterMovement()->Velocity};
+		Velocity.X = 0.0;
+		Velocity.Y = 0.0;
+		UpdateAimPreview();
+	}
+	UpdateCrouchCamera(DeltaTime);
+	UpdateAimZoom(DeltaTime);
+}
+
+void APlayerCharacter::OnStartCrouch(const float HalfHeightAdjust, const float ScaledHalfHeightAdjust)
+{
+	Super::OnStartCrouch(HalfHeightAdjust, ScaledHalfHeightAdjust);
+	CameraHeightOffset += ScaledHalfHeightAdjust;
+}
+
+void APlayerCharacter::OnEndCrouch(const float HalfHeightAdjust, const float ScaledHalfHeightAdjust)
+{
+	Super::OnEndCrouch(HalfHeightAdjust, ScaledHalfHeightAdjust);
+	CameraHeightOffset -= ScaledHalfHeightAdjust;
+}
+
+// The capsule moves at once. This offset hides the jump and eases the camera to its new height
+void APlayerCharacter::UpdateCrouchCamera(const float DeltaTime)
+{
+	CameraHeightOffset = FMath::FInterpTo(CameraHeightOffset, 0.f, DeltaTime, CrouchCameraSpeed);
+	CameraBoom->TargetOffset = FVector{0.f, 0.f, CameraHeightOffset};
+}
+
+void APlayerCharacter::UpdateAimZoom(const float DeltaTime)
+{
+	const float TargetFieldOfView{bAiming ? AimFieldOfView : DefaultFieldOfView};
+	const float TargetArmLength{bAiming ? AimArmLength : DefaultArmLength};
+
+	PlayerCamera->SetFieldOfView(FMath::FInterpTo(PlayerCamera->FieldOfView, TargetFieldOfView, DeltaTime, AimZoomSpeed));
+	CameraBoom->TargetArmLength = FMath::FInterpTo(CameraBoom->TargetArmLength, TargetArmLength, DeltaTime, AimZoomSpeed);
+}
+
+void APlayerCharacter::PlayCrouchAnim(const float Rate) const
+{
+	if (!StandUpAnim) return;
+
+	UAnimInstance* AnimInstance{GetMesh()->GetAnimInstance()};
+	if (!AnimInstance) return;
+
+	const float StartTime{Rate < 0.f ? StandUpAnim->GetPlayLength() : 0.f};
+	AnimInstance->Montage_Play(StandUpAnim, Rate, EMontagePlayReturnType::MontageLength, StartTime);
 }
 
 void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -79,13 +138,19 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 	EnhancedInput->BindAction(InputReference->Calm, ETriggerEvent::Started, this, &APlayerCharacter::StartCalm);
 	EnhancedInput->BindAction(InputReference->Calm, ETriggerEvent::Completed, this, &APlayerCharacter::StopCalm);
 	EnhancedInput->BindAction(InputReference->Interact, ETriggerEvent::Started, this, &APlayerCharacter::TryPickUp);
+	EnhancedInput->BindAction(InputReference->Crouch, ETriggerEvent::Started, this, &APlayerCharacter::ToggleCrouch);
+	EnhancedInput->BindAction(InputReference->Aim, ETriggerEvent::Started, this, &APlayerCharacter::StartAim);
+	EnhancedInput->BindAction(InputReference->Aim, ETriggerEvent::Completed, this, &APlayerCharacter::CancelAim);
+	EnhancedInput->BindAction(InputReference->Aim, ETriggerEvent::Canceled, this, &APlayerCharacter::CancelAim);
+	EnhancedInput->BindAction(InputReference->Throw, ETriggerEvent::Started, this, &APlayerCharacter::ThrowHeldItem);
 }
 
 void APlayerCharacter::ApplyMovementInput(const FInputActionValue& Value)
 {
-	if (bCalm) return;
+	if (bCalm || bAiming) return;
 
 	const FVector2D Clamped{Value.Get<FVector2D>().GetClampedToMaxSize(1.0)};
+	if (!Clamped.IsNearlyZero()) ExitCrouch();
 	AddMovementInput(GetActorForwardVector(), Clamped.Y);
 	AddMovementInput(GetActorRightVector(), Clamped.X);
 }
@@ -93,8 +158,133 @@ void APlayerCharacter::ApplyMovementInput(const FInputActionValue& Value)
 void APlayerCharacter::ApplyLookInput(const FInputActionValue& Value)
 {
 	const FVector2D Look{Value.Get<FVector2D>()};
+
+	if (bAiming)
+	{
+		AimOffset = ClampAimOffset(AimOffset + FRotator{Look.Y, Look.X, 0.f}, MaxAimYaw, MaxAimPitch);
+		if (AController* PlayerController{GetController()})
+		{
+			PlayerController->SetControlRotation((AimBaseRotation + AimOffset).GetNormalized());
+		}
+		return;
+	}
+
 	AddControllerYawInput(Look.X);
 	AddControllerPitchInput(-Look.Y);
+}
+
+FRotator APlayerCharacter::ClampAimOffset(const FRotator& Offset, const float MaxYaw, const float MaxPitch)
+{
+	return FRotator{
+		FMath::Clamp(FRotator::NormalizeAxis(Offset.Pitch), -MaxPitch, MaxPitch),
+		FMath::Clamp(FRotator::NormalizeAxis(Offset.Yaw), -MaxYaw, MaxYaw),
+		0.f};
+}
+
+void APlayerCharacter::StartAim()
+{
+	if (bAiming || !IsValid(HeldItem) || bCalm) return;
+
+	const AController* PlayerController{GetController()};
+	if (!PlayerController) return;
+
+	bAiming = true;
+	AimBaseRotation = PlayerController->GetControlRotation();
+	AimOffset = FRotator::ZeroRotator;
+	ApplySpeed(WalkingSpeed);
+	GetCharacterMovement()->StopMovementImmediately();
+	OnAimChanged(true);
+}
+
+void APlayerCharacter::CancelAim()
+{
+	const bool bWasAiming{bAiming};
+	bAiming = false;
+	if (bWasAiming) OnAimChanged(false);
+	AimOffset = FRotator::ZeroRotator;
+	if (bSprintHeld && CanSprint()) ApplySpeed(SprintingSpeed);
+}
+
+void APlayerCharacter::ThrowHeldItem()
+{
+	if (!bAiming) return;
+
+	AActor* Held{HeldItem};
+	const AController* PlayerController{GetController()};
+	CancelAim();
+
+	if (!IsValid(Held) || !PlayerController) return;
+
+	if (ThrowAnim) PlayAnimMontage(ThrowAnim);
+
+	const FVector Direction{GetThrowDirection()};
+
+	FActorSpawnParameters SpawnParams{};
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	SpawnParams.Instigator = this;
+	SpawnParams.bDeferConstruction = true;
+
+	AActor* Thrown{GetWorld()->SpawnActor<AActor>(Held->GetClass(), FTransform{Direction.Rotation(), GetThrowStart()}, SpawnParams)};
+
+	Held->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+	Held->Destroy();
+	HeldItem = nullptr;
+
+	if (!Thrown) return;
+
+	AThrowablePickup* HeldThrowable{Cast<AThrowablePickup>(Held)};
+	if (AThrowablePickup* ThrownThrowable{Cast<AThrowablePickup>(Thrown)})
+	{
+		if (HeldThrowable) ThrownThrowable->UseMesh(HeldThrowable->GetCurrentMesh());
+		ThrownThrowable->MarkThrown();
+	}
+
+	Thrown->FinishSpawning(FTransform{Direction.Rotation(), GetThrowStart()});
+
+	if (AThrowablePickup* ThrownThrowable{Cast<AThrowablePickup>(Thrown)})
+	{
+		ThrownThrowable->Launch(Direction * ThrowSpeed);
+	}
+	else if (UPrimitiveComponent* Body{Cast<UPrimitiveComponent>(Thrown->GetRootComponent())})
+	{
+		Body->SetSimulatePhysics(true);
+		Body->SetPhysicsLinearVelocity(Direction * ThrowSpeed);
+	}
+}
+
+FVector APlayerCharacter::GetThrowDirection() const
+{
+	return GetController() ? GetController()->GetControlRotation().Vector() : GetActorForwardVector();
+}
+
+FVector APlayerCharacter::GetThrowStart() const
+{
+	return GetPawnViewLocation() + GetThrowDirection() * ThrowSpawnDistance;
+}
+
+void APlayerCharacter::UpdateAimPreview() const
+{
+	if (!bShowThrowPreview || !IsValid(HeldItem)) return;
+
+	FPredictProjectilePathParams Params{};
+	Params.StartLocation = GetThrowStart();
+	Params.LaunchVelocity = GetThrowDirection() * ThrowSpeed;
+	Params.ProjectileRadius = 5.f;
+	Params.MaxSimTime = PreviewSeconds;
+	Params.SimFrequency = 15.f;
+	Params.bTraceWithCollision = true;
+	Params.TraceChannel = ECC_Visibility;
+	Params.ActorsToIgnore = {const_cast<APlayerCharacter*>(this), HeldItem};
+
+	FPredictProjectilePathResult Result{};
+	UGameplayStatics::PredictProjectilePath(this, Params, Result);
+
+	for (int32 Index{1}; Index < Result.PathData.Num(); ++Index)
+	{
+		DrawDebugLine(GetWorld(), Result.PathData[Index - 1].Location, Result.PathData[Index].Location, FColor::White, false, -1.f, 0, 2.f);
+	}
+
+	DrawDebugSphere(GetWorld(), Result.LastTraceDestination.Location, 12.f, 8, Result.HitResult.bBlockingHit ? FColor::Green : FColor::Red, false, -1.f, 0, 1.5f);
 }
 
 void APlayerCharacter::StartSprint()
@@ -107,6 +297,32 @@ void APlayerCharacter::StopSprint()
 {
 	bSprintHeld = false;
 	ApplySpeed(WalkingSpeed);
+}
+
+void APlayerCharacter::ToggleCrouch()
+{
+	if (bAiming) return;
+
+	if (bIsCrouched)
+	{
+		ExitCrouch();
+		return;
+	}
+
+	if (!CanCrouch()) return;
+
+	Crouch();
+	ApplySpeed(WalkingSpeed);
+	PlayCrouchAnim(-CrouchAnimRate);
+}
+
+void APlayerCharacter::ExitCrouch()
+{
+	if (!bIsCrouched) return;
+
+	UnCrouch();
+	PlayCrouchAnim(CrouchAnimRate);
+	if (bSprintHeld && CanSprint()) ApplySpeed(SprintingSpeed);
 }
 
 void APlayerCharacter::StartCalm()
@@ -206,35 +422,31 @@ AActor* APlayerCharacter::FindPickupCandidate()
 	FCollisionQueryParams QueryParams{};
 	QueryParams.AddIgnoredActor(this);
 
-	FHitResult Hit{};
+	TArray<FHitResult> Hits{};
+	World->SweepMultiByChannel(Hits, Start, End, FQuat::Identity, ECC_Visibility, FCollisionShape::MakeSphere(PickUpRadius), QueryParams);
 
-	const bool bHit = World->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, QueryParams);
+	// The sweep ends at the first blocking hit, so a wall hides what is behind it
+	AActor* Candidate{};
+	for (const FHitResult& Hit : Hits)
+	{
+		AActor* HitActor{Hit.GetActor()};
+		if (IsValid(HitActor) && HitActor->GetClass()->ImplementsInterface(UInteractableInterface::StaticClass()))
+		{
+			Candidate = HitActor;
+			break;
+		}
+	}
 
 #if WITH_EDITOR
 	if (ShowPickUpDebugRay)
 	{
-		DrawDebugLine(World, Start, End, bHit ? FColor::Green : FColor::Red, false, 5.0f, 0, 5.0f);
+		const FColor Color{Candidate ? FColor::Green : FColor::Red};
+		DrawDebugLine(World, Start, End, Color, false, 5.0f, 0, 2.0f);
+		DrawDebugSphere(World, End, PickUpRadius, 12, Color, false, 5.0f, 0, 1.0f);
 	}
 #endif
-	
-	if (!bHit)
-	{
-		return nullptr;
-	}
 
-	AActor* HitActor{Hit.GetActor()};
-
-	if (!IsValid(HitActor))
-	{
-		return nullptr;
-	}
-
-	if (!HitActor->GetClass()->ImplementsInterface(UInteractableInterface::StaticClass()))
-	{
-		return nullptr;
-	}
-
-	return HitActor;
+	return Candidate;
 }
 
 void APlayerCharacter::TryPickUp()
@@ -249,6 +461,9 @@ void APlayerCharacter::TryPickUp()
 		return;
 	}
 
+	// The pickup can destroy itself in Execute_PickUp, so the animation plays first
+	if (PickupAnim) PlayAnimMontage(PickupAnim);
+
 	IInteractableInterface::Execute_PickUp(TargetActor, this);
 	PickUp(TargetActor);
 }
@@ -262,6 +477,7 @@ void APlayerCharacter::PickUp(AActor* TargetActor)
 	}
 
 	HeldItem = TargetActor;
+	TargetActor->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, HandSocketName);
 
 	//UE_LOG(LogTemp, Log, TEXT("Player Picked Up %s"), *TargetActor->GetName());
 }

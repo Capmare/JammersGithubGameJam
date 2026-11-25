@@ -43,19 +43,44 @@ public:
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
 	virtual AActor* GetHeldItem() override { return HeldItem; }
+
+	// Keeps the aim offset inside the allowed box so the spine does not twist too far
+	virtual void OnStartCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust) override;
+	virtual void OnEndCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust) override;
+
+	static FRotator ClampAimOffset(const FRotator& Offset, float MaxYaw, float MaxPitch);
+
+	bool IsAiming() const { return bAiming; }
+
+	// Fires when aiming starts or stops. Use it to show or hide a crosshair widget
+	UFUNCTION(BlueprintImplementableEvent, Category = "CotS|Throw")
+	void OnAimChanged(bool bNowAiming);
 	
 private:
 	void ApplyMovementInput(const FInputActionValue& Value);
 	void ApplyLookInput(const FInputActionValue& Value);
 	void StartSprint();
 	void StopSprint();
+	void UpdateCrouchCamera(float DeltaTime);
+	void UpdateAimZoom(float DeltaTime);
+	void PlayCrouchAnim(float Rate) const;
+	void ToggleCrouch();
+	void ExitCrouch();
 	void StartCalm();
 	void StopCalm();
 	void UpdateStamina(float DeltaTime);
 	void UpdateHeartbeat(float DeltaTime);
-	bool CanSprint() const { return !bExhausted && !bCalm; }
+	bool CanSprint() const { return !bExhausted && !bCalm && !bIsCrouched; }
 	void TogglePaint();
 	void ApplySpeed(float NewSpeed) const;
+
+	void UpdateAimPreview() const;
+	FVector GetThrowDirection() const;
+	FVector GetThrowStart() const;
+
+	void StartAim();
+	void ThrowHeldItem();
+	void CancelAim();
 
 	AActor* FindPickupCandidate();
 	void TryPickUp();
@@ -65,7 +90,75 @@ private:
 
 	UPROPERTY()
 	AActor* HeldItem{ nullptr };
+
+	bool bAiming{};
+	FRotator AimBaseRotation{};
+	FRotator AimOffset{};
 	
+	UPROPERTY(BlueprintReadWrite,EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS")
+	TObjectPtr<UAnimMontage> PickupAnim{};
+	
+	UPROPERTY(BlueprintReadWrite,EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS")
+	TObjectPtr<UAnimMontage> ThrowAnim{};
+
+	// Max turn left or right, in degrees, while the player aims
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0"), Category = "CotS")
+	float CrouchingSpeed{300.f};
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS|Crouch")
+	// Stand up animation. The player plays it backward to crouch
+	TObjectPtr<UAnimMontage> StandUpAnim{};
+
+	// 1 is the montage speed. Lower is slower
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0.05"), Category = "CotS|Crouch")
+	float CrouchAnimRate{0.5f};
+
+	// How fast the camera moves to the new height. Lower is slower
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0.1"), Category = "CotS|Crouch")
+	float CrouchCameraSpeed{3.f};
+
+	float CameraHeightOffset{};
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0", ClampMax="90"), Category = "CotS|Throw")
+	float MaxAimYaw{30.f};
+
+	// Max turn up or down, in degrees, while the player aims
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0", ClampMax="89"), Category = "CotS|Throw")
+	float MaxAimPitch{20.f};
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0"), Category = "CotS|Throw")
+	float ThrowSpeed{1500.f};
+
+	// Camera field of view in degrees while aiming. Lower zooms in more
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="10", ClampMax="170"), Category = "CotS|Throw")
+	float AimFieldOfView{60.f};
+
+	// Camera arm length while aiming. Lower puts the camera closer
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0"), Category = "CotS|Throw")
+	float AimArmLength{150.f};
+
+	// How fast the zoom moves. Lower is slower
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0.1"), Category = "CotS|Throw")
+	float AimZoomSpeed{8.f};
+
+	float DefaultFieldOfView{90.f};
+	float DefaultArmLength{250.f};
+
+	// Distance in front of the player where the item appears
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0"), Category = "CotS|Throw")
+	float ThrowSpawnDistance{100.f};
+
+	// Socket on the player mesh that holds the item
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS|Throw")
+	FName HandSocketName{TEXT("hand_r")};
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS|Throw")
+	bool bShowThrowPreview{true};
+
+	// Seconds of flight that the preview arc shows
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0.1"), Category = "CotS|Throw")
+	float PreviewSeconds{2.f};
+
 	UPROPERTY(BlueprintReadWrite,EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS")
 	TObjectPtr<UPlayerInputDataAsset> InputReference{};
 
@@ -96,6 +189,10 @@ private:
 
 	UPROPERTY(BlueprintReadWrite,EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS")
 	float PickUpDistance{600.f};
+
+	// Radius of the sphere that looks for a pickup. A bigger value is easier to aim
+	UPROPERTY(BlueprintReadWrite,EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0"), Category = "CotS")
+	float PickUpRadius{40.f};
 
 	UPROPERTY(BlueprintReadWrite,EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS")
 	bool ShowPickUpDebugRay{false};
