@@ -76,6 +76,14 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CotS|Physics", meta = (AllowPrivateAccess = "true", ClampMin = "0"))
 	float Friction{0.6f};
 
+	/** Seconds the object keeps its physics after it first hits the ground. Then it stops. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CotS|Physics", meta = (AllowPrivateAccess = "true", ClampMin = "0"))
+	float PhysicsTimeAfterLanding{1.f};
+
+	/** A hit counts as ground when the surface normal points this far up. 1 is flat ground. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CotS|Physics", meta = (AllowPrivateAccess = "true", ClampMin = "0", ClampMax = "1"))
+	float GroundNormalMinZ{0.7f};
+
 	/** Only a pawn the player controls can pick this up. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CotS", meta = (AllowPrivateAccess = "true"))
 	bool bPlayerOnly{true};
@@ -93,6 +101,10 @@ protected:
 	float HintCooldown{1.f};
 
 private:
+	void FreezePhysics();
+
+	FTimerHandle FreezeTimer{};
+	bool bLaunched{};
 	bool bHeld{};
 	bool bThrownPending{};
 	bool bMeshFixed{};

@@ -5,6 +5,7 @@
 #include "CotSMonsterDirector.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
 #include "GameFramework/Pawn.h"
 
@@ -18,7 +19,8 @@ AThrowablePickup::AThrowablePickup()
 	// Pawns pass through the object, so it never pushes or traps the player. The camera ignores it too
 	PhysicsBody->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
 	PhysicsBody->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
-	PhysicsBody->SetSimulatePhysics(true);
+	// Physics starts only after a throw, so the object does not roll around in the level
+	PhysicsBody->SetSimulatePhysics(false);
 	PhysicsBody->SetNotifyRigidBodyCollision(true);
 
 	// The mesh only shows the object. The sphere holds the physics, so the mesh needs no collision
@@ -43,7 +45,7 @@ void AThrowablePickup::BeginPlay()
 		VisualMesh->AttachToComponent(PhysicsBody, FAttachmentTransformRules::KeepRelativeTransform);
 	}
 	PhysicsBody->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-	PhysicsBody->SetSimulatePhysics(true);
+	PhysicsBody->SetSimulatePhysics(false);
 	PhysicsBody->SetSphereRadius(CollisionRadius);
 	PhysicsBody->SetMassOverrideInKg(NAME_None, MassKg);
 	PhysicsBody->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
@@ -88,10 +90,18 @@ void AThrowablePickup::Launch(const FVector& Velocity)
 	// A Blueprint child can override these values, so the throw sets them again
 	PhysicsBody->SetMobility(EComponentMobility::Movable);
 	PhysicsBody->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	bLaunched = true;
+	GetWorldTimerManager().ClearTimer(FreezeTimer);
 	PhysicsBody->SetEnableGravity(true);
 	PhysicsBody->SetSimulatePhysics(true);
 	PhysicsBody->WakeAllRigidBodies();
 	PhysicsBody->SetPhysicsLinearVelocity(Velocity);
+}
+
+void AThrowablePickup::FreezePhysics()
+{
+	PhysicsBody->SetSimulatePhysics(false);
+	bLaunched = false;
 }
 
 void AThrowablePickup::UseMesh(UStaticMesh* NewMesh)
@@ -118,6 +128,8 @@ void AThrowablePickup::PickUp_Implementation(AActor* Interactor)
 	}
 
 	bHeld = true;
+	bLaunched = false;
+	GetWorldTimerManager().ClearTimer(FreezeTimer);
 	PhysicsBody->SetSimulatePhysics(false);
 	SetActorEnableCollision(false);
 }
@@ -125,6 +137,13 @@ void AThrowablePickup::PickUp_Implementation(AActor* Interactor)
 void AThrowablePickup::NotifyHit(UPrimitiveComponent* MyComp, AActor* Other, UPrimitiveComponent* OtherComp, const bool bSelfMoved, const FVector HitLocation, const FVector HitNormal, const FVector NormalImpulse, const FHitResult& Hit)
 {
 	Super::NotifyHit(MyComp, Other, OtherComp, bSelfMoved, HitLocation, HitNormal, NormalImpulse, Hit);
+
+	// The first ground hit starts a short timer. When it ends, the physics stops
+	const bool bGround{FMath::Abs(Hit.ImpactNormal.Z) >= GroundNormalMinZ};
+	if (bLaunched && bGround && !GetWorldTimerManager().IsTimerActive(FreezeTimer))
+	{
+		GetWorldTimerManager().SetTimer(FreezeTimer, this, &AThrowablePickup::FreezePhysics, PhysicsTimeAfterLanding);
+	}
 
 	const bool bFirstHit{bThrownPending};
 	bThrownPending = false;

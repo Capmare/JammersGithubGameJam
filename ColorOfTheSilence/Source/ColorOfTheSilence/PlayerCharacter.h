@@ -44,6 +44,15 @@ public:
 
 	virtual AActor* GetHeldItem() override { return HeldItem; }
 
+	// Starts the sound world. The world then swaps back and forth at random times
+	void BeginWorldSwapping();
+
+	bool IsInSoundWorld() const { return bPaintActive; }
+
+	// 0 is fully rested. 1 is fully exhausted.
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "CotS|Stamina")
+	float GetTiredness() const { return 1.f - FMath::Clamp(Stamina / MaxStamina, 0.f, 1.f); }
+
 	// Keeps the aim offset inside the allowed box so the spine does not twist too far
 	virtual void OnStartCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust) override;
 	virtual void OnEndCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust) override;
@@ -69,9 +78,12 @@ private:
 	void StartCalm();
 	void StopCalm();
 	void UpdateStamina(float DeltaTime);
+	void StartTiredPause();
+	bool IsTiredPausing() const;
 	void UpdateHeartbeat(float DeltaTime);
 	bool CanSprint() const { return !bExhausted && !bCalm && !bIsCrouched; }
-	void TogglePaint();
+	void SetSoundWorld(bool bSound);
+	void ScheduleNextWorldSwap();
 	void ApplySpeed(float NewSpeed) const;
 
 	void UpdateAimPreview() const;
@@ -169,6 +181,16 @@ private:
 	TObjectPtr<UPaintEffectComponent> PaintEffect{};
 
 	bool bPaintActive{};
+	bool bWorldSwapping{};
+	FTimerHandle WorldSwapTimer{};
+	FRandomStream SwapRandom{};
+
+	// Shortest and longest wait, in seconds, before the next world swap
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="1"), Category = "CotS|World")
+	float MinWorldSwapSeconds{20.f};
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="1"), Category = "CotS|World")
+	float MaxWorldSwapSeconds{45.f};
 	bool bSprintHeld{};
 	bool bCalm{};
 	bool bExhausted{};
@@ -227,4 +249,25 @@ private:
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0"), Category = "CotS|Stamina")
 	float SprintResumeStamina{30.f};
+
+	// Plays once when the stamina reaches 0
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS|Stamina")
+	TObjectPtr<UAnimMontage> ExhaustedAnim{};
+
+	// Used only when no ExhaustedAnim is set. The player then stops for a random time between these two values, in seconds
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0"), Category = "CotS|Stamina")
+	float MinExhaustedPause{1.f};
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0"), Category = "CotS|Stamina")
+	float MaxExhaustedPause{2.f};
+
+	// Seconds the montage takes to blend in. A higher value is smoother
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0"), Category = "CotS|Stamina")
+	float ExhaustedBlendInSeconds{0.4f};
+
+	// How fast the player slows down when the stamina runs out. A lower value is smoother
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0.1"), Category = "CotS|Stamina")
+	float ExhaustedSlowDownSpeed{5.f};
+
+	double TiredPauseEndTime{};
 };
