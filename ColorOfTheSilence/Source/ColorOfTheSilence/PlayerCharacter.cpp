@@ -125,7 +125,7 @@ void APlayerCharacter::PlayCrouchAnim(const float Rate) const
 	UAnimInstance* AnimInstance{GetMesh()->GetAnimInstance()};
 	if (!AnimInstance) return;
 
-	const float StartTime{Rate < 0.f ? StandUpAnim->GetPlayLength() : 0.f};
+	const float StartTime{Rate < 0.f ? static_cast<float>(StandUpAnim->GetPlayLength()) : 0.f};
 	AnimInstance->Montage_Play(StandUpAnim, Rate, EMontagePlayReturnType::MontageLength, StartTime);
 }
 
@@ -389,7 +389,7 @@ void APlayerCharacter::StartTiredPause()
 			MontageLength = AnimInstance->Montage_PlayWithBlendSettings(ExhaustedAnim, BlendIn);
 		}
 	}
-	const float Pause{MontageLength > 0.f ? MontageLength : FMath::FRandRange(MinExhaustedPause, FMath::Max(MinExhaustedPause, MaxExhaustedPause))};
+	const float Pause{MontageLength > 0.f ? MontageLength : static_cast<float>(FMath::FRandRange(MinExhaustedPause, FMath::Max(MinExhaustedPause, MaxExhaustedPause)))};
 	TiredPauseEndTime = GetWorld()->GetTimeSeconds() + Pause;
 }
 
@@ -441,7 +441,7 @@ void APlayerCharacter::BeginWorldSwapping()
 
 void APlayerCharacter::ScheduleNextWorldSwap()
 {
-	const float Wait{SwapRandom.FRandRange(MinWorldSwapSeconds, FMath::Max(MinWorldSwapSeconds, MaxWorldSwapSeconds))};
+	const float Wait{static_cast<float>(SwapRandom.FRandRange(MinWorldSwapSeconds, FMath::Max(MinWorldSwapSeconds, MaxWorldSwapSeconds)))};
 	GetWorldTimerManager().SetTimer(WorldSwapTimer, FTimerDelegate::CreateWeakLambda(this, [this]()
 	{
 		SetSoundWorld(!bPaintActive);
