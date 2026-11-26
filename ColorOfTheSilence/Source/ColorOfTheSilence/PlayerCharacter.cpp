@@ -140,6 +140,9 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 	EnhancedInput->BindAction(InputReference->Look, ETriggerEvent::Triggered, this, &APlayerCharacter::ApplyLookInput);
 	EnhancedInput->BindAction(InputReference->Sprint, ETriggerEvent::Started, this, &APlayerCharacter::StartSprint);
 	EnhancedInput->BindAction(InputReference->Sprint, ETriggerEvent::Completed, this, &APlayerCharacter::StopSprint);
+#if !UE_BUILD_SHIPPING
+	EnhancedInput->BindAction(InputReference->Paint, ETriggerEvent::Started, this, &APlayerCharacter::DebugTogglePaint);
+#endif
 	EnhancedInput->BindAction(InputReference->Calm, ETriggerEvent::Started, this, &APlayerCharacter::StartCalm);
 	EnhancedInput->BindAction(InputReference->Calm, ETriggerEvent::Completed, this, &APlayerCharacter::StopCalm);
 	EnhancedInput->BindAction(InputReference->Interact, ETriggerEvent::Started, this, &APlayerCharacter::TryPickUp);
@@ -419,6 +422,11 @@ void APlayerCharacter::SetSoundWorld(const bool bSound)
 	bPaintActive = bSound;
 	if (bPaintActive) PaintEffect->Start();
 	else PaintEffect->Reverse();
+}
+
+void APlayerCharacter::DebugTogglePaint()
+{
+	SetSoundWorld(!bPaintActive);
 }
 
 void APlayerCharacter::BeginWorldSwapping()

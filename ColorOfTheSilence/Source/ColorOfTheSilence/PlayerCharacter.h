@@ -83,6 +83,7 @@ private:
 	void UpdateHeartbeat(float DeltaTime);
 	bool CanSprint() const { return !bExhausted && !bCalm && !bIsCrouched; }
 	void SetSoundWorld(bool bSound);
+	void DebugTogglePaint();
 	void ScheduleNextWorldSwap();
 	void ApplySpeed(float NewSpeed) const;
 
