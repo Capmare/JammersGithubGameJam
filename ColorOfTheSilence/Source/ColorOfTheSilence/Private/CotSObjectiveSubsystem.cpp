@@ -7,6 +7,8 @@
 #include "HidingSpot.h"
 #include "KeyPickup.h"
 #include "KeySpot.h"
+#include "../PlayerCharacter.h"
+#include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 
@@ -221,6 +223,13 @@ bool UCotSObjectiveSubsystem::ReportKeyCollected(const AKeyPickup* Key)
 
 	++CollectedKeys;
 	UE_LOG(LogCotS, Log, TEXT("Key counted: %d / %d"), CollectedKeys, KeysRequired);
+
+	// The first key starts the sound world first, so the hint of this key still counts
+	if (CollectedKeys == 1)
+	{
+		if (UCotSMonsterDirector* Director{UCotSMonsterDirector::Get(this)}) Director->ActivateMonsters();
+		if (APlayerCharacter* Player{Cast<APlayerCharacter>(UGameplayStatics::GetPlayerPawn(this, 0))}) Player->BeginWorldSwapping();
+	}
 	if (KeyCollectedHintStrength > 0.f)
 	{
 		UCotSMonsterDirector::SendHint(this, Key->GetActorLocation(), KeyCollectedHintStrength, TEXT("KeyCollected"));

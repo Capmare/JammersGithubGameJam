@@ -32,6 +32,10 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "CotS|Director")
 	int32 GetPlayerSection() const { return PlayerSection; }
 
+	// Sound only reaches the monster while the player is in the sound world
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "CotS|Director")
+	bool IsSoundWorldActive() const;
+
 	UFUNCTION(BlueprintCallable, Category = "CotS|Director")
 	void GiveHint(FVector Location, float Strength = 1.f, FName Source = NAME_None);
 
@@ -66,7 +70,14 @@ public:
 	void UnregisterSpawnPoint(const AMonsterSpawnPoint* Point);
 
 	UFUNCTION(BlueprintCallable, Category = "CotS|Director")
-	bool TeleportMonsterToSection(int32 Section);
+	bool TeleportMonsterToSection(int32 Section, bool bFurthestFromPlayer = false);
+
+	// No monster is active until this call. The first key calls it. The monster then spawns in the player section, at the point furthest from the player
+	UFUNCTION(BlueprintCallable, Category = "CotS|Director")
+	void ActivateMonsters();
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "CotS|Director")
+	bool AreMonstersActive() const { return bMonstersActive; }
 
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "CotS|Director")
 	float GetNearestMonsterDistance(FVector Location) const;
@@ -116,6 +127,7 @@ public:
 
 private:
 	int32 PlayerSection{INDEX_NONE};
+	bool bMonstersActive{};
 	float Pressure{};
 	bool bRetreating{};
 	bool bEntryPending{};

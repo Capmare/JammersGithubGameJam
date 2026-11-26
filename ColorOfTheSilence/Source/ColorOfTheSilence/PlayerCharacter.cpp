@@ -72,14 +72,20 @@ void APlayerCharacter::Tick(float DeltaTime)
 
 	UpdateStamina(DeltaTime);
 	UpdateHeartbeat(DeltaTime);
+	// Only X and Y change, so gravity still works
+	FVector& Velocity{GetCharacterMovement()->Velocity};
 	if (bAiming)
 	{
-		// Zeroes only X and Y so gravity still works
-		FVector& Velocity{GetCharacterMovement()->Velocity};
 		Velocity.X = 0.0;
 		Velocity.Y = 0.0;
-		UpdateAimPreview();
 	}
+	else if (IsTiredPausing())
+	{
+		const FVector Slowed{FMath::VInterpTo(Velocity, FVector{0.0, 0.0, Velocity.Z}, DeltaTime, ExhaustedSlowDownSpeed)};
+		Velocity.X = Slowed.X;
+		Velocity.Y = Slowed.Y;
+	}
+	if (bAiming) UpdateAimPreview();
 	UpdateCrouchCamera(DeltaTime);
 	UpdateAimZoom(DeltaTime);
 }
@@ -119,7 +125,7 @@ void APlayerCharacter::PlayCrouchAnim(const float Rate) const
 	UAnimInstance* AnimInstance{GetMesh()->GetAnimInstance()};
 	if (!AnimInstance) return;
 
-	const float StartTime{Rate < 0.f ? StandUpAnim->GetPlayLength() : 0.f};
+	const float StartTime{Rate < 0.f ? static_cast<float>(StandUpAnim->GetPlayLength()) : 0.f};
 	AnimInstance->Montage_Play(StandUpAnim, Rate, EMontagePlayReturnType::MontageLength, StartTime);
 }
 
@@ -134,7 +140,9 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 	EnhancedInput->BindAction(InputReference->Look, ETriggerEvent::Triggered, this, &APlayerCharacter::ApplyLookInput);
 	EnhancedInput->BindAction(InputReference->Sprint, ETriggerEvent::Started, this, &APlayerCharacter::StartSprint);
 	EnhancedInput->BindAction(InputReference->Sprint, ETriggerEvent::Completed, this, &APlayerCharacter::StopSprint);
-	EnhancedInput->BindAction(InputReference->Paint, ETriggerEvent::Started, this, &APlayerCharacter::TogglePaint);
+#if !UE_BUILD_SHIPPING
+	EnhancedInput->BindAction(InputReference->Paint, ETriggerEvent::Started, this, &APlayerCharacter::DebugTogglePaint);
+#endif
 	EnhancedInput->BindAction(InputReference->Calm, ETriggerEvent::Started, this, &APlayerCharacter::StartCalm);
 	EnhancedInput->BindAction(InputReference->Calm, ETriggerEvent::Completed, this, &APlayerCharacter::StopCalm);
 	EnhancedInput->BindAction(InputReference->Interact, ETriggerEvent::Started, this, &APlayerCharacter::TryPickUp);
@@ -147,7 +155,7 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 
 void APlayerCharacter::ApplyMovementInput(const FInputActionValue& Value)
 {
-	if (bCalm || bAiming) return;
+	if (bCalm || bAiming || IsTiredPausing()) return;
 
 	const FVector2D Clamped{Value.Get<FVector2D>().GetClampedToMaxSize(1.0)};
 	if (!Clamped.IsNearlyZero()) ExitCrouch();
@@ -157,6 +165,8 @@ void APlayerCharacter::ApplyMovementInput(const FInputActionValue& Value)
 
 void APlayerCharacter::ApplyLookInput(const FInputActionValue& Value)
 {
+	if (IsTiredPausing()) return;
+
 	const FVector2D Look{Value.Get<FVector2D>()};
 
 	if (bAiming)
@@ -349,6 +359,7 @@ void APlayerCharacter::UpdateStamina(const float DeltaTime)
 		{
 			bExhausted = true;
 			ApplySpeed(WalkingSpeed);
+			StartTiredPause();
 		}
 		return;
 	}
@@ -361,6 +372,27 @@ void APlayerCharacter::UpdateStamina(const float DeltaTime)
 	}
 }
 
+bool APlayerCharacter::IsTiredPausing() const
+{
+	return GetWorld() && GetWorld()->GetTimeSeconds() < TiredPauseEndTime;
+}
+
+void APlayerCharacter::StartTiredPause()
+{
+	float MontageLength{};
+	if (ExhaustedAnim)
+	{
+		if (UAnimInstance* AnimInstance{GetMesh()->GetAnimInstance()})
+		{
+			FMontageBlendSettings BlendIn{ExhaustedBlendInSeconds};
+			BlendIn.Blend.BlendOption = EAlphaBlendOption::HermiteCubic;
+			MontageLength = AnimInstance->Montage_PlayWithBlendSettings(ExhaustedAnim, BlendIn);
+		}
+	}
+	const float Pause{MontageLength > 0.f ? MontageLength : static_cast<float>(FMath::FRandRange(MinExhaustedPause, FMath::Max(MinExhaustedPause, MaxExhaustedPause)))};
+	TiredPauseEndTime = GetWorld()->GetTimeSeconds() + Pause;
+}
+
 void APlayerCharacter::UpdateHeartbeat(const float DeltaTime)
 {
 	if (!HeartbeatSound) return;
@@ -368,7 +400,7 @@ void APlayerCharacter::UpdateHeartbeat(const float DeltaTime)
 	HeartbeatTimer -= DeltaTime;
 	if (HeartbeatTimer > 0.f) return;
 
-	const float StaminaStress{1.f - Stamina / MaxStamina};
+	const float StaminaStress{GetTiredness()};
 
 	float MonsterFear{};
 	if (const UCotSMonsterDirector* Director{UCotSMonsterDirector::Get(this)})
@@ -383,12 +415,38 @@ void APlayerCharacter::UpdateHeartbeat(const float DeltaTime)
 	HeartbeatTimer = FMath::Lerp(SlowestBeatInterval, FastestBeatInterval, Intensity);
 }
 
-void APlayerCharacter::TogglePaint()
+void APlayerCharacter::SetSoundWorld(const bool bSound)
 {
-	bPaintActive = !bPaintActive;
+	if (bPaintActive == bSound) return;
 
+	bPaintActive = bSound;
 	if (bPaintActive) PaintEffect->Start();
 	else PaintEffect->Reverse();
+}
+
+void APlayerCharacter::DebugTogglePaint()
+{
+	SetSoundWorld(!bPaintActive);
+}
+
+void APlayerCharacter::BeginWorldSwapping()
+{
+	if (bWorldSwapping) return;
+
+	bWorldSwapping = true;
+	SwapRandom.Initialize(static_cast<int32>(FPlatformTime::Cycles64()));
+	SetSoundWorld(true);
+	ScheduleNextWorldSwap();
+}
+
+void APlayerCharacter::ScheduleNextWorldSwap()
+{
+	const float Wait{static_cast<float>(SwapRandom.FRandRange(MinWorldSwapSeconds, FMath::Max(MinWorldSwapSeconds, MaxWorldSwapSeconds)))};
+	GetWorldTimerManager().SetTimer(WorldSwapTimer, FTimerDelegate::CreateWeakLambda(this, [this]()
+	{
+		SetSoundWorld(!bPaintActive);
+		ScheduleNextWorldSwap();
+	}), Wait, false);
 }
 
 void APlayerCharacter::ApplySpeed(const float NewSpeed) const

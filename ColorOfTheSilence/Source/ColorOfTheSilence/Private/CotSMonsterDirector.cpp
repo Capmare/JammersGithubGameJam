@@ -16,6 +16,7 @@
 #include "MonsterFreezeComponent.h"
 #include "MonsterSpawnPoint.h"
 #include "SectionVolume.h"
+#include "../PlayerCharacter.h"
 
 namespace
 {
@@ -57,9 +58,18 @@ void UCotSMonsterDirector::SetPlayerSection(const int32 Section)
 	bEntryPending = true;
 }
 
+void UCotSMonsterDirector::ActivateMonsters()
+{
+	if (bMonstersActive) return;
+
+	bMonstersActive = true;
+	UE_LOG(LogCotS, Log, TEXT("Director: the monsters are active. The first key was collected."));
+	if (PlayerSection != INDEX_NONE) TeleportMonsterToSection(PlayerSection, true);
+}
+
 void UCotSMonsterDirector::ApplySectionEntry()
 {
-	if (PlayerSection == INDEX_NONE)
+	if (PlayerSection == INDEX_NONE || !bMonstersActive)
 	{
 		for (const TWeakObjectPtr<AMonsterCharacter>& WeakMonster : Monsters)
 		{
@@ -85,7 +95,7 @@ void UCotSMonsterDirector::UnregisterSpawnPoint(const AMonsterSpawnPoint* Point)
 	SpawnPoints.RemoveAll([Point](const TWeakObjectPtr<AMonsterSpawnPoint>& Weak) { return !Weak.IsValid() || Weak.Get() == Point; });
 }
 
-bool UCotSMonsterDirector::TeleportMonsterToSection(const int32 Section)
+bool UCotSMonsterDirector::TeleportMonsterToSection(const int32 Section, const bool bFurthestFromPlayer)
 {
 	TArray<const AMonsterSpawnPoint*> Candidates;
 	for (const TWeakObjectPtr<AMonsterSpawnPoint>& WeakPoint : SpawnPoints)
@@ -103,6 +113,25 @@ bool UCotSMonsterDirector::TeleportMonsterToSection(const int32 Section)
 		return false;
 	}
 
+	const APawn* PlayerPawn{UGameplayStatics::GetPlayerPawn(this, 0)};
+	auto PickPoint{[&]() -> const AMonsterSpawnPoint*
+	{
+		if (!bFurthestFromPlayer || !PlayerPawn) return Candidates[FMath::RandRange(0, Candidates.Num() - 1)];
+
+		const AMonsterSpawnPoint* Furthest{};
+		double BestDistance{-1.0};
+		for (const AMonsterSpawnPoint* Point : Candidates)
+		{
+			const double Distance{FVector::DistSquared(Point->GetActorLocation(), PlayerPawn->GetActorLocation())};
+			if (Distance > BestDistance)
+			{
+				BestDistance = Distance;
+				Furthest = Point;
+			}
+		}
+		return Furthest;
+	}};
+
 	if (!Monsters.ContainsByPredicate([](const TWeakObjectPtr<AMonsterCharacter>& Weak) { return Weak.IsValid(); }))
 	{
 		UClass* Class{MonsterClass.LoadSynchronous()};
@@ -112,7 +141,7 @@ bool UCotSMonsterDirector::TeleportMonsterToSection(const int32 Section)
 			return false;
 		}
 
-		const AMonsterSpawnPoint* Point{Candidates[FMath::RandRange(0, Candidates.Num() - 1)]};
+		const AMonsterSpawnPoint* Point{PickPoint()};
 		FActorSpawnParameters Params;
 		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
 		const AMonsterCharacter* Spawned{GetWorld()->SpawnActor<AMonsterCharacter>(Class, Point->GetActorLocation(), Point->GetActorRotation(), Params)};
@@ -126,7 +155,7 @@ bool UCotSMonsterDirector::TeleportMonsterToSection(const int32 Section)
 		AMonsterCharacter* Monster{WeakMonster.Get()};
 		if (!Monster) continue;
 
-		const AMonsterSpawnPoint* Chosen{Candidates[FMath::RandRange(0, Candidates.Num() - 1)]};
+		const AMonsterSpawnPoint* Chosen{PickPoint()};
 		if (!Monster->TeleportTo(Chosen->GetActorLocation(), Chosen->GetActorRotation())) continue;
 
 		const bool bWasDormant{Monster->IsDormant()};
@@ -186,6 +215,14 @@ void UCotSMonsterDirector::Tick(const float DeltaTime)
 			{
 				if (AMonsterCharacter* Monster{WeakMonster.Get()}) Monster->SetDormant(true);
 			}
+		}
+	}
+
+	if (!bMonstersActive)
+	{
+		for (const TWeakObjectPtr<AMonsterCharacter>& WeakMonster : Monsters)
+		{
+			if (AMonsterCharacter* Monster{WeakMonster.Get()}) Monster->SetDormant(true);
 		}
 	}
 
@@ -332,8 +369,20 @@ int32 UCotSMonsterDirector::GetSectionAtLocation(const FVector Location) const
 	return BestSection;
 }
 
+bool UCotSMonsterDirector::IsSoundWorldActive() const
+{
+	const APlayerCharacter* Player{Cast<APlayerCharacter>(UGameplayStatics::GetPlayerPawn(this, 0))};
+	return Player && Player->IsInSoundWorld();
+}
+
 void UCotSMonsterDirector::GiveHint(const FVector Location, const float Strength, const FName Source)
 {
+	if (!IsSoundWorldActive())
+	{
+		UE_LOG(LogCotS, Verbose, TEXT("Director: the hint '%s' is ignored. The player is not in the sound world."), *Source.ToString());
+		return;
+	}
+
 	const double Now{GetWorld()->GetTimeSeconds()};
 	Sounds.Add({Location, Strength, Now, Source, Strength >= MinHintStrength});
 
