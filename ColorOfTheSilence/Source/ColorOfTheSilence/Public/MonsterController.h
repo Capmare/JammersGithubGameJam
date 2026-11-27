@@ -20,6 +20,8 @@ public:
 	void ResetBehavior();
 	void StopBehavior();
 
+	FString DescribeBehavior() const;
+
 protected:
 	virtual void OnPossess(APawn* InPawn) override;
 	virtual void BeginPlay() override;

@@ -1,4 +1,5 @@
 #include "MonsterFreezeComponent.h"
+#include "MonsterCharacter.h"
 
 #include "CotSMonsterDirector.h"
 #include "CotSObjectiveSubsystem.h"
@@ -39,6 +40,14 @@ void UMonsterFreezeComponent::TickComponent(float DeltaTime, ELevelTick TickType
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
 	bSeen = ComputeSeen();
+
+	const AMonsterCharacter* Monster{Cast<AMonsterCharacter>(GetOwner())};
+	if (Monster && Monster->IsFreezeSuspended())
+	{
+		UnseenTime = UnseenDelay;
+		if (bFrozen) SetFrozen(false);
+		return;
+	}
 
 	const UCotSMonsterDirector* Director{UCotSMonsterDirector::Get(this)};
 	const bool bAware{!bFreezeOnlyWhenAware || (Director && Director->IsPlayerDetected())};

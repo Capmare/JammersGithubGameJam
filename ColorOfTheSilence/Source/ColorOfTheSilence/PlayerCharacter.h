@@ -15,6 +15,15 @@ class UInputMappingContext;
 class USceneComponent;
 class USoundBase;
 class UAnimSequenceBase;
+class AMonsterCharacter;
+class APickedUpDouble;
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCotSPickedUp, AMonsterCharacter*, Monster);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCotSStruggleStarted, float, TimeLimit);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCotSStruggleProgress, float, Progress);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnCotSStrugglePressed);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnCotSEscaped);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnCotSCaptureFailed);
 
 enum class EPlayerWalkingStatus
 {
@@ -50,6 +59,40 @@ public:
 
 	bool IsInSoundWorld() const { return bPaintActive; }
 
+	void BeginPickedUp(AMonsterCharacter* Monster);
+	void EndPickedUp(bool bEscaped);
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "CotS|Grab")
+	bool IsPickedUp() const { return bPickedUp; }
+
+	// 0 is caught. 1 is escaped
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "CotS|Grab")
+	float GetStruggleProgress() const { return StruggleProgress; }
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "CotS|Grab")
+	float GetStruggleTimeRemaining() const { return StruggleTimeRemaining; }
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "CotS|Grab")
+	float GetStruggleTimeLimit() const { return StruggleTimeLimit; }
+
+	UPROPERTY(BlueprintAssignable, Category = "CotS|Grab|Events")
+	FOnCotSPickedUp OnPickedUp;
+
+	UPROPERTY(BlueprintAssignable, Category = "CotS|Grab|Events")
+	FOnCotSStruggleStarted OnStruggleStarted;
+
+	UPROPERTY(BlueprintAssignable, Category = "CotS|Grab|Events")
+	FOnCotSStrugglePressed OnStrugglePressed;
+
+	UPROPERTY(BlueprintAssignable, Category = "CotS|Grab|Events")
+	FOnCotSStruggleProgress OnStruggleProgressChanged;
+
+	UPROPERTY(BlueprintAssignable, Category = "CotS|Grab|Events")
+	FOnCotSEscaped OnEscaped;
+
+	UPROPERTY(BlueprintAssignable, Category = "CotS|Grab|Events")
+	FOnCotSCaptureFailed OnCaptureFailed;
+
 	// 0 is fully rested. 1 is fully exhausted.
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "CotS|Stamina")
 	float GetTiredness() const { return 1.f - FMath::Clamp(Stamina / MaxStamina, 0.f, 1.f); }
@@ -80,6 +123,9 @@ private:
 	void StopCrouchIdle();
 	void ToggleCrouch();
 	void StartJump();
+	void Struggle();
+	void UpdateStruggle(float DeltaTime);
+	void PlayPickedUpLoop();
 	bool IsJumping() const;
 	void ExitCrouch();
 	void StartCalm();
@@ -121,6 +167,33 @@ private:
 	// Root motion montage. It moves the character, so no physics jump is used
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS|Jump")
 	TObjectPtr<UAnimMontage> JumpAnim{};
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS|Grab")
+	TObjectPtr<UAnimMontage> PickedUpAnim{};
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS|Grab")
+	TObjectPtr<UAnimMontage> HittingPickedUpAnim{};
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0.01", ClampMax="1"), Category = "CotS|Grab")
+	float StruggleProgressPerPress{0.1f};
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0"), Category = "CotS|Grab")
+	float StruggleDecayPerSecond{0.15f};
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="1"), Category = "CotS|Grab")
+	float StruggleTimeLimit{10.f};
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0"), Category = "CotS|Grab")
+	float PickUpMoveSeconds{0.4f};
+
+	bool bPickedUp{};
+	float StruggleProgress{};
+	float StruggleTimeRemaining{};
+	TWeakObjectPtr<AMonsterCharacter> PickedUpBy{};
+	TObjectPtr<APickedUpDouble> PickedUpDouble{};
+	EVisibilityBasedAnimTickOption SavedAnimTickOption{};
+	float PickedUpLogTimer{};
+	void LogPickedUpTransforms(const TCHAR* Label) const;
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0"), Category = "CotS|Jump")
 	float JumpUpImpulse{150.f};

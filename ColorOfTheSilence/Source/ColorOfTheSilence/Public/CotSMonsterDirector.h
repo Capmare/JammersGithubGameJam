@@ -82,6 +82,8 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "CotS|Director")
 	float GetNearestMonsterDistance(FVector Location) const;
 
+	bool GetFurthestSpawnLocation(const FVector& From, FVector& OutLocation) const;
+
 	void RegisterMonster(AMonsterCharacter* Monster);
 	void UnregisterMonster(const AMonsterCharacter* Monster);
 
@@ -125,11 +127,25 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CotS|Director", meta = (ClampMin = "0"))
 	float RetreatEndPressure{30.f};
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CotS|Director", meta = (ClampMin = "0", ClampMax = "1"))
+	float AttackPressureFraction{0.6f};
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CotS|Director", meta = (ClampMin = "0", ClampMax = "1"))
+	float StalkPressureFraction{0.5f};
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CotS|Director", meta = (ClampMin = "0", ClampMax = "1"))
+	float StalkEndPressureFraction{0.4f};
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CotS|Director", meta = (ClampMin = "0"))
+	float AttackCooldownSeconds{30.f};
+
 private:
 	int32 PlayerSection{INDEX_NONE};
 	bool bMonstersActive{};
 	float Pressure{};
 	bool bRetreating{};
+	double NextAttackTime{};
+	int32 LastPressureStage{};
 	bool bEntryPending{};
 
 	void ApplySectionEntry();
