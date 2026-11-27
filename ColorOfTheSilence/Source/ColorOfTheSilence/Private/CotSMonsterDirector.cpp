@@ -153,7 +153,7 @@ bool UCotSMonsterDirector::TeleportMonsterToSection(const int32 Section, const b
 	for (const TWeakObjectPtr<AMonsterCharacter>& WeakMonster : Monsters)
 	{
 		AMonsterCharacter* Monster{WeakMonster.Get()};
-		if (!Monster) continue;
+		if (!Monster || Monster->ShouldAlwaysSpawn()) continue;
 
 		const AMonsterSpawnPoint* Chosen{PickPoint()};
 		if (!Monster->TeleportTo(Chosen->GetActorLocation(), Chosen->GetActorRotation())) continue;
@@ -178,6 +178,24 @@ float UCotSMonsterDirector::GetNearestMonsterDistance(const FVector Location) co
 		if (const AMonsterCharacter* Monster{WeakMonster.Get()}; Monster && !Monster->IsDormant()) Best = FMath::Min(Best, FVector::Dist(Monster->GetActorLocation(), Location));
 	}
 	return static_cast<float>(Best);
+}
+
+bool UCotSMonsterDirector::GetFurthestSpawnLocation(const FVector& From, FVector& OutLocation) const
+{
+	double BestDistance{-1.0};
+	for (const TWeakObjectPtr<AMonsterSpawnPoint>& WeakPoint : SpawnPoints)
+	{
+		const AMonsterSpawnPoint* Point{WeakPoint.Get()};
+		if (!Point) continue;
+
+		const double Distance{FVector::DistSquared(Point->GetActorLocation(), From)};
+		if (Distance > BestDistance)
+		{
+			BestDistance = Distance;
+			OutLocation = Point->GetActorLocation();
+		}
+	}
+	return BestDistance >= 0.0;
 }
 
 void UCotSMonsterDirector::RegisterMonster(AMonsterCharacter* Monster)
@@ -266,6 +284,53 @@ void UCotSMonsterDirector::Tick(const float DeltaTime)
 	{
 		bRetreating = false;
 		UE_LOG(LogCotS, Log, TEXT("Director: the retreat ends."));
+	}
+
+	const float PressureFraction{Pressure / MaxPressure};
+	const int32 PressureStage{PressureFraction >= AttackPressureFraction ? 2 : PressureFraction >= StalkPressureFraction ? 1 : 0};
+	if (PressureStage != LastPressureStage)
+	{
+		UE_LOG(LogCotS, Log, TEXT("Director: pressure %.0f (%.0f%%). Stage %d -> %d (0 calm, 1 stalk, 2 attack)%s"), Pressure, PressureFraction * 100.f, LastPressureStage, PressureStage, bRetreating ? TEXT(" | retreating") : TEXT(""));
+		LastPressureStage = PressureStage;
+	}
+	APlayerCharacter* PlayerCharacter{Cast<APlayerCharacter>(UGameplayStatics::GetPlayerPawn(this, 0))};
+	for (const TWeakObjectPtr<AMonsterCharacter>& WeakMonster : Monsters)
+	{
+		AMonsterCharacter* Monster{WeakMonster.Get()};
+		if (!Monster || Monster->IsDormant()) continue;
+
+		if (bRetreating || PressureFraction < StalkEndPressureFraction)
+		{
+			Monster->EndStalk(true);
+		}
+		else if (PressureFraction >= StalkPressureFraction && FVector::Dist(Monster->GetActorLocation(), Player->GetActorLocation()) <= CloseDistance)
+		{
+			Monster->BeginStalk(PlayerCharacter);
+		}
+	}
+
+	if (!bRetreating && Now >= NextAttackTime && Pressure >= MaxPressure * AttackPressureFraction)
+	{
+		AMonsterCharacter* Nearest{};
+		double NearestDistance{TNumericLimits<double>::Max()};
+		for (const TWeakObjectPtr<AMonsterCharacter>& WeakMonster : Monsters)
+		{
+			AMonsterCharacter* Monster{WeakMonster.Get()};
+			if (!Monster || Monster->IsDormant() || Monster->IsGrabbing()) continue;
+
+			const double Distance{FVector::Dist(Monster->GetActorLocation(), Player->GetActorLocation())};
+			if (Distance < NearestDistance)
+			{
+				NearestDistance = Distance;
+				Nearest = Monster;
+			}
+		}
+
+		if (Nearest && Nearest->OrderAttack(PlayerCharacter))
+		{
+			NextAttackTime = Now + AttackCooldownSeconds;
+			UE_LOG(LogCotS, Log, TEXT("Director: pressure is %.0f. The monster attacks the player."), Pressure);
+		}
 	}
 
 	const double DetectionNow{GetWorld()->GetTimeSeconds()};
@@ -537,7 +602,7 @@ void UCotSMonsterDirector::DrawDebug() const
 
 		const UMonsterFreezeComponent* Freeze{Monster->GetFreezeComponent()};
 		const TCHAR* Motion{Freeze && Freeze->IsFrozen() ? TEXT("frozen") : TEXT("moving")};
-		DrawDebugString(World, Position + FVector(0.f, 0.f, 140.f), FString::Printf(TEXT("%s | %s | pressure %.0f/%.0f%s | player section %d"), Motion, *PathText, Pressure, MaxPressure, bRetreating ? TEXT(" RETREAT") : TEXT(""), PlayerSection), nullptr, FColor::White, 0.f, true);
+		DrawDebugString(World, Position + FVector(0.f, 0.f, 140.f), FString::Printf(TEXT("%s | %s | %s | pressure %.0f/%.0f (stalk %.0f attack %.0f)%s | player section %d"), Monster->GetModeLabel(), Motion, *PathText, Pressure, MaxPressure, MaxPressure * StalkPressureFraction, MaxPressure * AttackPressureFraction, bRetreating ? TEXT(" RETREAT") : TEXT(""), PlayerSection), nullptr, FColor::White, 0.f, true);
 	}
 #endif
 }

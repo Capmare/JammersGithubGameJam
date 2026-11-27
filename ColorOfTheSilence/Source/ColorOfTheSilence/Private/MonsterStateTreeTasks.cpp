@@ -7,6 +7,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "MonsterCharacter.h"
 #include "MonsterFreezeComponent.h"
+#include "../PlayerCharacter.h"
 #include "StateTreeExecutionContext.h"
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(MonsterStateTreeTasks)
@@ -48,7 +49,12 @@ EStateTreeRunStatus FCotSPickHidingSpotTask::EnterState(FStateTreeExecutionConte
 		}
 	}
 
-	if (!Best) return EStateTreeRunStatus::Failed;
+	if (!Best)
+	{
+		UE_LOG(LogCotS, Log, TEXT("ST Pick spot: no spot in section %d"), Data.Section);
+		return EStateTreeRunStatus::Failed;
+	}
+	UE_LOG(LogCotS, Log, TEXT("ST Pick spot: %s in section %d"), *Best->GetName(), Data.Section);
 
 	Best->MarkChecked();
 	Data.TargetSpot = Best;
@@ -63,6 +69,7 @@ EStateTreeRunStatus FCotSInspectSpotTask::EnterState(FStateTreeExecutionContext&
 
 	Data.bPlayerFound = false;
 	Data.Remaining = Data.Spot->GetInspectSeconds();
+	UE_LOG(LogCotS, Log, TEXT("ST Inspect: %s for %.1f s"), *Data.Spot->GetName(), Data.Remaining);
 	return EStateTreeRunStatus::Running;
 }
 
@@ -80,6 +87,7 @@ EStateTreeRunStatus FCotSInspectSpotTask::Tick(FStateTreeExecutionContext& Conte
 
 	Data.Spot->MarkChecked();
 	Data.bPlayerFound = Data.Spot->IsOccupiedByPlayer();
+	UE_LOG(LogCotS, Log, TEXT("ST Inspect done: player found %d"), Data.bPlayerFound);
 	return EStateTreeRunStatus::Succeeded;
 }
 
@@ -87,24 +95,36 @@ EStateTreeRunStatus FCotSCatchPlayerTask::EnterState(FStateTreeExecutionContext&
 {
 	const FInstanceDataType& Data{Context.GetInstanceData(*this)};
 
-	const AMonsterCharacter* Monster{Data.AIController ? Cast<AMonsterCharacter>(Data.AIController->GetPawn()) : nullptr};
-	const APawn* Player{UGameplayStatics::GetPlayerPawn(Context.GetOwner(), 0)};
-	UCotSObjectiveSubsystem* Objectives{UCotSObjectiveSubsystem::Get(Context.GetOwner())};
-	if (!Monster || !Player || !Objectives) return EStateTreeRunStatus::Failed;
+	AMonsterCharacter* Monster{Data.AIController ? Cast<AMonsterCharacter>(Data.AIController->GetPawn()) : nullptr};
+	APlayerCharacter* Player{Cast<APlayerCharacter>(UGameplayStatics::GetPlayerPawn(Context.GetOwner(), 0))};
+	if (!Monster || !Player)
+	{
+		UE_LOG(LogCotS, Log, TEXT("ST Catch: monster %d player %d"), IsValid(Monster), IsValid(Player));
+		return EStateTreeRunStatus::Failed;
+	}
 
 	const UMonsterFreezeComponent* Freeze{Monster->GetFreezeComponent()};
-	if (Freeze && (Freeze->IsFrozen() || Freeze->IsSeenByPlayer())) return EStateTreeRunStatus::Failed;
+	if (Freeze && (Freeze->IsFrozen() || Freeze->IsSeenByPlayer()))
+	{
+		UE_LOG(LogCotS, Log, TEXT("ST Catch: refused, the player sees the monster"));
+		return EStateTreeRunStatus::Failed;
+	}
 
-	if (FVector::Dist(Monster->GetActorLocation(), Player->GetActorLocation()) > Data.MaxCatchDistance) return EStateTreeRunStatus::Failed;
+	const double CatchDistance{FVector::Dist(Monster->GetActorLocation(), Player->GetActorLocation())};
+	if (CatchDistance > Data.MaxCatchDistance)
+	{
+		UE_LOG(LogCotS, Log, TEXT("ST Catch: refused, distance %.0f > %.0f"), CatchDistance, Data.MaxCatchDistance);
+		return EStateTreeRunStatus::Failed;
+	}
 
-	Objectives->ReportPlayerCaught();
-	return EStateTreeRunStatus::Succeeded;
+	return Monster->GrabPlayer(Player) ? EStateTreeRunStatus::Succeeded : EStateTreeRunStatus::Failed;
 }
 
 EStateTreeRunStatus FCotSDropHintTask::EnterState(FStateTreeExecutionContext& Context, const FStateTreeTransitionResult& Transition) const
 {
 	const FInstanceDataType& Data{Context.GetInstanceData(*this)};
 
+	UE_LOG(LogCotS, Log, TEXT("ST Drop hint at %s"), *Data.Location.ToString());
 	if (UCotSMonsterDirector* Director{UCotSMonsterDirector::Get(Context.GetOwner())}) Director->DropHintsNear(Data.Location);
 	return EStateTreeRunStatus::Succeeded;
 }
@@ -130,8 +150,15 @@ namespace
 		FCotSDirectorEvaluatorInstanceData& Data{Context.GetInstanceData(Evaluator)};
 		if (UCotSMonsterDirector* Director{UCotSMonsterDirector::Get(Context.GetOwner())})
 		{
+			const bool bOldRetreat{Data.bRetreat};
+			const bool bOldHint{Data.bHasHintLocation};
+			const bool bOldDetected{Data.bPlayerDetected};
 			Director->GetHint(Data.TargetSection, Data.bRetreat, Data.bHasHintLocation, Data.HintLocation, Data.HintStrength);
 			Data.bPlayerDetected = Director->IsPlayerDetected();
+			if (bOldRetreat != Data.bRetreat || bOldHint != Data.bHasHintLocation || bOldDetected != Data.bPlayerDetected)
+			{
+				UE_LOG(LogCotS, Log, TEXT("ST Director data: retreat %d hint %d (strength %.2f, section %d) detected %d"), Data.bRetreat, Data.bHasHintLocation, Data.HintStrength, Data.TargetSection, Data.bPlayerDetected);
+			}
 		}
 	}
 }
@@ -164,6 +191,7 @@ EStateTreeRunStatus FCotSChasePlayerTask::EnterState(FStateTreeExecutionContext&
 
 	Data.LostTime = 0.f;
 	Data.RepathTime = 0.f;
+	UE_LOG(LogCotS, Log, TEXT("ST Chase: enter"));
 	return EStateTreeRunStatus::Running;
 }
 
@@ -171,21 +199,27 @@ EStateTreeRunStatus FCotSChasePlayerTask::Tick(FStateTreeExecutionContext& Conte
 {
 	FInstanceDataType& Data{Context.GetInstanceData(*this)};
 
-	const AMonsterCharacter* Monster{Data.AIController ? Cast<AMonsterCharacter>(Data.AIController->GetPawn()) : nullptr};
-	APawn* Player{UGameplayStatics::GetPlayerPawn(Context.GetOwner(), 0)};
-	UCotSObjectiveSubsystem* Objectives{UCotSObjectiveSubsystem::Get(Context.GetOwner())};
-	if (!Monster || !Player || !Objectives) return EStateTreeRunStatus::Failed;
+	AMonsterCharacter* Monster{Data.AIController ? Cast<AMonsterCharacter>(Data.AIController->GetPawn()) : nullptr};
+	APlayerCharacter* Player{Cast<APlayerCharacter>(UGameplayStatics::GetPlayerPawn(Context.GetOwner(), 0))};
+	if (!Monster || !Player)
+	{
+		UE_LOG(LogCotS, Log, TEXT("ST Chase: monster %d player %d"), IsValid(Monster), IsValid(Player));
+		return EStateTreeRunStatus::Failed;
+	}
 
 	const UMonsterFreezeComponent* Freeze{Monster->GetFreezeComponent()};
 	if (Freeze && Freeze->IsFrozen()) return EStateTreeRunStatus::Running;
 
 	const UCotSMonsterDirector* Director{UCotSMonsterDirector::Get(Context.GetOwner())};
 	Data.LostTime = (Director && Director->IsPlayerDetected()) ? 0.f : Data.LostTime + DeltaTime;
-	if (Data.LostTime >= Data.LoseSeconds) return EStateTreeRunStatus::Failed;
-
-	if (FVector::Dist(Monster->GetActorLocation(), Player->GetActorLocation()) <= Data.CatchDistance)
+	if (Data.LostTime >= Data.LoseSeconds)
 	{
-		Objectives->ReportPlayerCaught();
+		UE_LOG(LogCotS, Log, TEXT("ST Chase: lost the player after %.1f s"), Data.LostTime);
+		return EStateTreeRunStatus::Failed;
+	}
+
+	if (FVector::Dist(Monster->GetActorLocation(), Player->GetActorLocation()) <= Data.CatchDistance && Monster->GrabPlayer(Player))
+	{
 		return EStateTreeRunStatus::Succeeded;
 	}
 

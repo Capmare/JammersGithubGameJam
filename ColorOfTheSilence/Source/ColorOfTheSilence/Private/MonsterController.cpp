@@ -1,6 +1,7 @@
 #include "MonsterController.h"
 
 #include "Components/StateTreeAIComponent.h"
+#include "CotSObjectiveSubsystem.h"
 #include "StateTree.h"
 
 AMonsterController::AMonsterController()
@@ -20,11 +21,16 @@ void AMonsterController::PostInitializeComponents()
 void AMonsterController::StopBehavior()
 {
 	StopMovement();
-	if (StateTreeComponent->IsRunning()) StateTreeComponent->StopLogic(TEXT("Dormant"));
+	if (StateTreeComponent->IsRunning())
+	{
+		UE_LOG(LogCotS, Log, TEXT("Monster AI: stop behavior"));
+		StateTreeComponent->StopLogic(TEXT("Dormant"));
+	}
 }
 
 void AMonsterController::ResetBehavior()
 {
+	UE_LOG(LogCotS, Log, TEXT("Monster AI: reset behavior (pawn %s, tree %s)"), *GetNameSafe(GetPawn()), *StateTreeAsset.ToString());
 	StopMovement();
 	if (StateTreeComponent->IsRunning()) StateTreeComponent->StopLogic(TEXT("Reset"));
 	if (GetPawn()) StateTreeComponent->StartLogic();
@@ -43,4 +49,13 @@ void AMonsterController::OnPossess(APawn* InPawn)
 	Super::OnPossess(InPawn);
 
 	if (HasActorBegunPlay()) ResetBehavior();
+}
+
+FString AMonsterController::DescribeBehavior() const
+{
+	FString States;
+#if WITH_GAMEPLAY_DEBUGGER
+	for (const FName& Name : StateTreeComponent->GetActiveStateNames()) States += Name.ToString() + TEXT(" > ");
+#endif
+	return FString::Printf(TEXT("running %d status %d states [%s]"), StateTreeComponent->IsRunning(), static_cast<int32>(StateTreeComponent->GetStateTreeRunStatus()), *States);
 }

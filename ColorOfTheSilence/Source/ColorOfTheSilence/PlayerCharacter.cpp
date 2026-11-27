@@ -19,6 +19,10 @@
 #include "PlayerInputDataAsset.h"
 #include "ThrowablePickup.h"
 #include "CotSMonsterDirector.h"
+#include "CotSObjectiveSubsystem.h"
+#include "MonsterCharacter.h"
+#include "PickedUpDouble.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "DrawDebugHelpers.h"
 
@@ -93,6 +97,7 @@ void APlayerCharacter::Tick(float DeltaTime)
 	}
 	if (bAiming) UpdateAimPreview();
 	UpdateCrouchCamera(DeltaTime);
+	if (bPickedUp) UpdateStruggle(DeltaTime);
 	UpdateCrouchOrbit(DeltaTime);
 	UpdateAimZoom(DeltaTime);
 }
@@ -131,7 +136,7 @@ void APlayerCharacter::UpdateCrouchOrbit(const float DeltaTime)
 		else bCameraReturning = false;
 	}
 
-	bUseControllerRotationYaw = bAiming || !bCameraReturning;
+	bUseControllerRotationYaw = !bPickedUp && (bAiming || !bCameraReturning);
 }
 
 void APlayerCharacter::UpdateAimZoom(const float DeltaTime)
@@ -218,11 +223,13 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 	EnhancedInput->BindAction(InputReference->Aim, ETriggerEvent::Completed, this, &APlayerCharacter::CancelAim);
 	EnhancedInput->BindAction(InputReference->Aim, ETriggerEvent::Canceled, this, &APlayerCharacter::CancelAim);
 	EnhancedInput->BindAction(InputReference->Throw, ETriggerEvent::Started, this, &APlayerCharacter::ThrowHeldItem);
+	if (InputReference->Struggle) EnhancedInput->BindAction(InputReference->Struggle, ETriggerEvent::Started, this, &APlayerCharacter::Struggle);
 	if (InputReference->Jump) EnhancedInput->BindAction(InputReference->Jump, ETriggerEvent::Started, this, &APlayerCharacter::StartJump);
 }
 
 void APlayerCharacter::ApplyMovementInput(const FInputActionValue& Value)
 {
+	if (bPickedUp) return;
 	if (bCalm || bAiming || IsTiredPausing() || IsJumping() || IsStandingUp()) return;
 
 	const FVector2D Clamped{Value.Get<FVector2D>().GetClampedToMaxSize(1.0)};
@@ -234,6 +241,7 @@ void APlayerCharacter::ApplyMovementInput(const FInputActionValue& Value)
 
 void APlayerCharacter::ApplyLookInput(const FInputActionValue& Value)
 {
+	if (bPickedUp) return;
 	if (IsTiredPausing()) return;
 
 	const FVector2D Look{Value.Get<FVector2D>()};
@@ -262,6 +270,7 @@ FRotator APlayerCharacter::ClampAimOffset(const FRotator& Offset, const float Ma
 
 void APlayerCharacter::StartAim()
 {
+	if (bPickedUp) return;
 	if (bAiming || !IsValid(HeldItem) || bCalm) return;
 
 	const AController* PlayerController{GetController()};
@@ -286,6 +295,7 @@ void APlayerCharacter::CancelAim()
 
 void APlayerCharacter::ThrowHeldItem()
 {
+	if (bPickedUp) return;
 	if (!bAiming) return;
 
 	AActor* Held{HeldItem};
@@ -368,6 +378,7 @@ void APlayerCharacter::UpdateAimPreview() const
 
 void APlayerCharacter::StartSprint()
 {
+	if (bPickedUp) return;
 	bSprintHeld = true;
 	if (CanSprint()) ApplySpeed(SprintingSpeed);
 }
@@ -380,6 +391,7 @@ void APlayerCharacter::StopSprint()
 
 void APlayerCharacter::ToggleCrouch()
 {
+	if (bPickedUp) return;
 	if (IsStandingUp()) return;
 	if (bAiming) return;
 
@@ -405,6 +417,7 @@ bool APlayerCharacter::IsJumping() const
 
 void APlayerCharacter::StartJump()
 {
+	if (bPickedUp) return;
 	if (!JumpAnim || bAiming || bCalm || IsTiredPausing() || IsJumping()) return;
 	if (GetCharacterMovement()->IsFalling()) return;
 
@@ -432,6 +445,7 @@ void APlayerCharacter::ExitCrouch()
 
 void APlayerCharacter::StartCalm()
 {
+	if (bPickedUp) return;
 	bCalm = true;
 	ApplySpeed(WalkingSpeed);
 	GetCharacterMovement()->StopMovementImmediately();
@@ -613,6 +627,7 @@ AActor* APlayerCharacter::FindPickupCandidate()
 
 void APlayerCharacter::TryPickUp()
 {
+	if (bPickedUp) return;
 	// UE_LOG(LogTemp, Log, TEXT("Trying Pickup!"));
 	
 	AActor* TargetActor{FindPickupCandidate()};
@@ -642,4 +657,208 @@ void APlayerCharacter::PickUp(AActor* TargetActor)
 	TargetActor->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, HandSocketName);
 
 	//UE_LOG(LogTemp, Log, TEXT("Player Picked Up %s"), *TargetActor->GetName());
+}
+
+void APlayerCharacter::BeginPickedUp(AMonsterCharacter* Monster)
+{
+	if (bPickedUp || !IsValid(Monster)) return;
+
+	bPickedUp = true;
+	PickedUpBy = Monster;
+	StruggleProgress = 0.f;
+	StruggleTimeRemaining = StruggleTimeLimit;
+
+	CancelAim();
+	if (bCalm) StopCalm();
+	StopCrouchIdle();
+	UnCrouch();
+	bSprintHeld = false;
+
+	UCharacterMovementComponent* Movement{GetCharacterMovement()};
+	Movement->StopMovementImmediately();
+	Movement->DisableMovement();
+	SetActorEnableCollision(false);
+	LogPickedUpTransforms(TEXT("before pickup"));
+
+	FActorSpawnParameters SpawnParameters{};
+	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	PickedUpDouble = GetWorld()->SpawnActor<APickedUpDouble>(APickedUpDouble::StaticClass(), GetActorTransform(), SpawnParameters);
+	if (PickedUpDouble)
+	{
+		PickedUpDouble->Initialize(this);
+		PickedUpDouble->BeginBlend(Monster->GetMesh(), Monster->GetHoldSocketName(), Monster->GetPlayerHoldTransform(), PickUpMoveSeconds);
+	}
+
+	SetActorLocation(Monster->GetHoldLocation(), false, nullptr, ETeleportType::TeleportPhysics);
+	SetActorRotation(FRotator{0.0, Monster->GetActorRotation().Yaw + 180.0, 0.0});
+
+	SavedAnimTickOption = GetMesh()->VisibilityBasedAnimTickOption;
+	GetMesh()->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+
+	PickedUpLogTimer = 0.f;
+	LogPickedUpTransforms(TEXT("after pickup"));
+
+	if (APlayerController* PlayerController{Cast<APlayerController>(GetController())})
+	{
+		if (UCameraComponent* GrabCamera{Monster->GetGrabCamera()})
+		{
+			GrabCamera->Activate();
+			PlayerController->SetViewTargetWithBlend(Monster, Monster->GetGrabCameraBlendTime());
+		}
+	}
+
+	PlayPickedUpLoop();
+
+	OnPickedUp.Broadcast(Monster);
+	OnStruggleStarted.Broadcast(StruggleTimeLimit);
+	OnStruggleProgressChanged.Broadcast(0.f);
+}
+
+void APlayerCharacter::EndPickedUp(const bool bEscaped)
+{
+	if (!bPickedUp) return;
+
+	bPickedUp = false;
+	AMonsterCharacter* Monster{PickedUpBy.Get()};
+	PickedUpBy.Reset();
+
+	LogPickedUpTransforms(TEXT("before release"));
+	DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+	SetActorEnableCollision(true);
+
+	GetMesh()->VisibilityBasedAnimTickOption = SavedAnimTickOption;
+	if (IsValid(PickedUpDouble))
+	{
+		PickedUpDouble->Destroy();
+		PickedUpDouble = nullptr;
+	}
+
+	if (UAnimInstance* AnimInstance{GetMesh()->GetAnimInstance()})
+	{
+		if (PickedUpAnim) AnimInstance->Montage_Stop(0.2f, PickedUpAnim);
+		if (HittingPickedUpAnim) AnimInstance->Montage_Stop(0.2f, HittingPickedUpAnim);
+	}
+
+	if (!bEscaped) return;
+
+	UCharacterMovementComponent* Movement{GetCharacterMovement()};
+	Movement->SetDefaultMovementMode();
+
+	APlayerController* PlayerController{Cast<APlayerController>(GetController())};
+	if (Monster)
+	{
+		const FVector MonsterLocation{Monster->GetActorLocation()};
+		const FVector Forward{Monster->GetActorForwardVector()};
+		SetActorLocation(MonsterLocation + Forward * Monster->GetEscapeDistance(), false, nullptr, ETeleportType::TeleportPhysics);
+
+		const FRotator Facing{0.0, (-Forward).Rotation().Yaw, 0.0};
+		SetActorRotation(Facing);
+		if (PlayerController) PlayerController->SetControlRotation(Facing);
+
+		if (UCameraComponent* GrabCamera{Monster->GetGrabCamera()}) GrabCamera->Deactivate();
+		if (PlayerController) PlayerController->SetViewTargetWithBlend(this, Monster->GetGrabCameraBlendTime());
+		Monster->ReleasePlayer();
+	}
+	else if (PlayerController)
+	{
+		PlayerController->SetViewTargetWithBlend(this, 0.f);
+	}
+
+	OnEscaped.Broadcast();
+}
+
+void APlayerCharacter::Struggle()
+{
+	if (!bPickedUp) return;
+
+	StruggleProgress = FMath::Clamp(StruggleProgress + StruggleProgressPerPress, 0.f, 1.f);
+	OnStrugglePressed.Broadcast();
+	OnStruggleProgressChanged.Broadcast(StruggleProgress);
+
+	if (StruggleProgress >= 1.f)
+	{
+		EndPickedUp(true);
+		return;
+	}
+
+	UAnimInstance* AnimInstance{GetMesh()->GetAnimInstance()};
+	if (!AnimInstance || !HittingPickedUpAnim) return;
+
+	AnimInstance->Montage_Play(HittingPickedUpAnim);
+	FOnMontageEnded EndDelegate{};
+	EndDelegate.BindWeakLambda(this, [this](UAnimMontage*, const bool bInterrupted)
+	{
+		if (!bInterrupted && bPickedUp) PlayPickedUpLoop();
+	});
+	AnimInstance->Montage_SetEndDelegate(EndDelegate, HittingPickedUpAnim);
+}
+
+void APlayerCharacter::UpdateStruggle(const float DeltaTime)
+{
+	if (const AMonsterCharacter* Holder{PickedUpBy.Get()})
+	{
+		SetActorLocation(Holder->GetHoldLocation(), false, nullptr, ETeleportType::TeleportPhysics);
+	}
+
+	PickedUpLogTimer += DeltaTime;
+	if (PickedUpLogTimer >= 1.f)
+	{
+		PickedUpLogTimer = 0.f;
+		LogPickedUpTransforms(TEXT("holding"));
+	}
+
+	if (StruggleTimeRemaining <= 0.f) return;
+
+	StruggleTimeRemaining -= DeltaTime;
+	if (StruggleTimeRemaining <= 0.f)
+	{
+		StruggleTimeRemaining = 0.f;
+		OnCaptureFailed.Broadcast();
+		if (UCotSObjectiveSubsystem* Objectives{UCotSObjectiveSubsystem::Get(this)}) Objectives->ReportPlayerCaught();
+		return;
+	}
+
+	const float Decayed{FMath::Max(0.f, StruggleProgress - StruggleDecayPerSecond * DeltaTime)};
+	if (!FMath::IsNearlyEqual(Decayed, StruggleProgress))
+	{
+		StruggleProgress = Decayed;
+		OnStruggleProgressChanged.Broadcast(StruggleProgress);
+	}
+}
+
+void APlayerCharacter::PlayPickedUpLoop()
+{
+	UAnimInstance* AnimInstance{GetMesh()->GetAnimInstance()};
+	if (!bPickedUp || !PickedUpAnim || !AnimInstance) return;
+
+	AnimInstance->Montage_Play(PickedUpAnim);
+	if (PickedUpAnim->GetNumSections() > 0)
+	{
+		const FName Section{PickedUpAnim->GetSectionName(0)};
+		AnimInstance->Montage_SetNextSection(Section, Section, PickedUpAnim);
+	}
+	FOnMontageEnded EndDelegate{};
+	EndDelegate.BindWeakLambda(this, [this](UAnimMontage*, const bool bInterrupted)
+	{
+		if (!bInterrupted) PlayPickedUpLoop();
+	});
+	AnimInstance->Montage_SetEndDelegate(EndDelegate, PickedUpAnim);
+}
+
+void APlayerCharacter::LogPickedUpTransforms(const TCHAR* Label) const
+{
+	const AMonsterCharacter* Monster{PickedUpBy.Get()};
+	const USkeletalMeshComponent* MonsterMesh{Monster ? Monster->GetMesh() : nullptr};
+	const FTransform Socket{MonsterMesh ? MonsterMesh->GetSocketTransform(Monster->GetHoldSocketName()) : FTransform::Identity};
+	const FTransform Actor{GetActorTransform()};
+	const FTransform Mesh{GetMesh()->GetComponentTransform()};
+
+	UE_LOG(LogCotS, Log, TEXT("Pickup %s | monster actor %s | player actor loc %s rot %s scale %s | player mesh scale %s rot %s | socket loc %s rot %s scale %s | monster mesh scale %s | double %s"),
+		Label,
+		Monster ? *Monster->GetActorLocation().ToCompactString() : TEXT("none"),
+		*Actor.GetLocation().ToCompactString(), *Actor.Rotator().ToCompactString(), *Actor.GetScale3D().ToCompactString(),
+		*Mesh.GetScale3D().ToCompactString(), *Mesh.Rotator().ToCompactString(),
+		*Socket.GetLocation().ToCompactString(), *Socket.Rotator().ToCompactString(), *Socket.GetScale3D().ToCompactString(),
+		MonsterMesh ? *MonsterMesh->GetComponentScale().ToCompactString() : TEXT("none"),
+		IsValid(PickedUpDouble) ? *PickedUpDouble->GetActorTransform().ToHumanReadableString() : TEXT("none"));
 }
