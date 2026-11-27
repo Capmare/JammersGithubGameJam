@@ -167,6 +167,14 @@ private:
 
 	float CameraHeightOffset{};
 
+	// Lowest camera angle, in degrees. A negative value looks down
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="-89", ClampMax="0"), Category = "CotS|Camera")
+	float MinCameraPitch{-50.f};
+
+	// Highest camera angle, in degrees. A positive value looks up
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0", ClampMax="89"), Category = "CotS|Camera")
+	float MaxCameraPitch{40.f};
+
 	bool bCameraReturning{};
 
 	float CrouchStartTime{-100.f};

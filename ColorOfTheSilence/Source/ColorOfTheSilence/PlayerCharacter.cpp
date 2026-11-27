@@ -6,6 +6,7 @@
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
 #include "Camera/CameraComponent.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Components/PrimitiveComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -58,6 +59,11 @@ void APlayerCharacter::BeginPlay()
 	Stamina = MaxStamina;
 
 	const APlayerController* PlayerController{Cast<APlayerController>(GetController())};
+	if (PlayerController && PlayerController->PlayerCameraManager)
+	{
+		PlayerController->PlayerCameraManager->ViewPitchMin = MinCameraPitch;
+		PlayerController->PlayerCameraManager->ViewPitchMax = MaxCameraPitch;
+	}
 	if (!PlayerController || !InputMappingReference) return;
 
 	if (auto* Subsystem{ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PlayerController->GetLocalPlayer())})
