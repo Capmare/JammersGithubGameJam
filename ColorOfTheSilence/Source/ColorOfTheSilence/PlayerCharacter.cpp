@@ -21,7 +21,6 @@
 #include "CotSMonsterDirector.h"
 #include "CotSObjectiveSubsystem.h"
 #include "MonsterCharacter.h"
-#include "PickedUpDouble.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "DrawDebugHelpers.h"
@@ -680,15 +679,6 @@ void APlayerCharacter::BeginPickedUp(AMonsterCharacter* Monster)
 	SetActorEnableCollision(false);
 	LogPickedUpTransforms(TEXT("before pickup"));
 
-	FActorSpawnParameters SpawnParameters{};
-	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	PickedUpDouble = GetWorld()->SpawnActor<APickedUpDouble>(APickedUpDouble::StaticClass(), GetActorTransform(), SpawnParameters);
-	if (PickedUpDouble)
-	{
-		PickedUpDouble->Initialize(this);
-		PickedUpDouble->BeginBlend(Monster->GetMesh(), Monster->GetHoldSocketName(), Monster->GetPlayerHoldTransform(), PickUpMoveSeconds);
-	}
-
 	SetActorLocation(Monster->GetHoldLocation(), false, nullptr, ETeleportType::TeleportPhysics);
 	SetActorRotation(FRotator{0.0, Monster->GetActorRotation().Yaw + 180.0, 0.0});
 
@@ -709,6 +699,9 @@ void APlayerCharacter::BeginPickedUp(AMonsterCharacter* Monster)
 
 	PlayPickedUpLoop();
 
+	GetWorldTimerManager().PauseTimer(WorldSwapTimer);
+	SetSoundWorld(true);
+
 	OnPickedUp.Broadcast(Monster);
 	OnStruggleStarted.Broadcast(StruggleTimeLimit);
 	OnStruggleProgressChanged.Broadcast(0.f);
@@ -722,16 +715,14 @@ void APlayerCharacter::EndPickedUp(const bool bEscaped)
 	AMonsterCharacter* Monster{PickedUpBy.Get()};
 	PickedUpBy.Reset();
 
+	SetSoundWorld(false);
+	GetWorldTimerManager().UnPauseTimer(WorldSwapTimer);
+
 	LogPickedUpTransforms(TEXT("before release"));
 	DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 	SetActorEnableCollision(true);
 
 	GetMesh()->VisibilityBasedAnimTickOption = SavedAnimTickOption;
-	if (IsValid(PickedUpDouble))
-	{
-		PickedUpDouble->Destroy();
-		PickedUpDouble = nullptr;
-	}
 
 	if (UAnimInstance* AnimInstance{GetMesh()->GetAnimInstance()})
 	{
@@ -853,12 +844,11 @@ void APlayerCharacter::LogPickedUpTransforms(const TCHAR* Label) const
 	const FTransform Actor{GetActorTransform()};
 	const FTransform Mesh{GetMesh()->GetComponentTransform()};
 
-	UE_LOG(LogCotS, Log, TEXT("Pickup %s | monster actor %s | player actor loc %s rot %s scale %s | player mesh scale %s rot %s | socket loc %s rot %s scale %s | monster mesh scale %s | double %s"),
+	UE_LOG(LogCotS, Log, TEXT("Pickup %s | monster actor %s | player actor loc %s rot %s scale %s | player mesh scale %s rot %s | socket loc %s rot %s scale %s | monster mesh scale %s"),
 		Label,
 		Monster ? *Monster->GetActorLocation().ToCompactString() : TEXT("none"),
 		*Actor.GetLocation().ToCompactString(), *Actor.Rotator().ToCompactString(), *Actor.GetScale3D().ToCompactString(),
 		*Mesh.GetScale3D().ToCompactString(), *Mesh.Rotator().ToCompactString(),
 		*Socket.GetLocation().ToCompactString(), *Socket.Rotator().ToCompactString(), *Socket.GetScale3D().ToCompactString(),
-		MonsterMesh ? *MonsterMesh->GetComponentScale().ToCompactString() : TEXT("none"),
-		IsValid(PickedUpDouble) ? *PickedUpDouble->GetActorTransform().ToHumanReadableString() : TEXT("none"));
+		MonsterMesh ? *MonsterMesh->GetComponentScale().ToCompactString() : TEXT("none"));
 }

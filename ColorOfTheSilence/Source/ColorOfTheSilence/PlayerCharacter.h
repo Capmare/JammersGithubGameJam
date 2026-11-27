@@ -16,7 +16,6 @@ class USceneComponent;
 class USoundBase;
 class UAnimSequenceBase;
 class AMonsterCharacter;
-class APickedUpDouble;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCotSPickedUp, AMonsterCharacter*, Monster);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCotSStruggleStarted, float, TimeLimit);
@@ -183,14 +182,11 @@ private:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="1"), Category = "CotS|Grab")
 	float StruggleTimeLimit{10.f};
 
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0"), Category = "CotS|Grab")
-	float PickUpMoveSeconds{0.4f};
 
 	bool bPickedUp{};
 	float StruggleProgress{};
 	float StruggleTimeRemaining{};
 	TWeakObjectPtr<AMonsterCharacter> PickedUpBy{};
-	TObjectPtr<APickedUpDouble> PickedUpDouble{};
 	EVisibilityBasedAnimTickOption SavedAnimTickOption{};
 	float PickedUpLogTimer{};
 	void LogPickedUpTransforms(const TCHAR* Label) const;
