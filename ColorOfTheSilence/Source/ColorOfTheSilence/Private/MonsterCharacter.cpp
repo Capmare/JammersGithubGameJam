@@ -152,7 +152,18 @@ void AMonsterCharacter::CompleteGrab()
 	}
 
 	UE_LOG(LogCotS, Log, TEXT("Monster %s: grab completes. The player is picked up."), *GetName());
+	if (GetMesh()->DoesSocketExist(GrabCameraSocketName))
+	{
+		GrabCamera->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, GrabCameraSocketName);
+		GrabCamera->SetRelativeLocation(GrabCameraOffset);
+	}
+	else
+	{
+		UE_LOG(LogCotS, Warning, TEXT("Monster %s: the mesh has no socket %s for the grab camera"), *GetName(), *GrabCameraSocketName.ToString());
+	}
 	Player->BeginPickedUp(this);
+	UpdateGrabCamera();
+	SetActorTickEnabled(true);
 	PlayHoldLoop();
 }
 
@@ -190,6 +201,7 @@ void AMonsterCharacter::ReleasePlayer()
 	bGrabbing = false;
 	GrabbedPlayer.Reset();
 	GetWorldTimerManager().ClearTimer(GrabTimer);
+	SetActorTickEnabled(bAttacking || bStalking || bFleeing);
 
 	float DropSeconds{};
 	if (UAnimInstance* AnimInstance{GetMesh()->GetAnimInstance()})
@@ -282,6 +294,12 @@ void AMonsterCharacter::EndAttack(const bool bResumeBehavior)
 void AMonsterCharacter::Tick(const float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+
+	if (bGrabbing)
+	{
+		UpdateGrabCamera();
+		return;
+	}
 
 	if (bFleeing)
 	{
@@ -431,4 +449,19 @@ bool AMonsterCharacter::FindFleeLocation(FVector& OutLocation) const
 		return true;
 	}
 	return false;
+}
+
+void AMonsterCharacter::UpdateGrabCamera()
+{
+	const APlayerCharacter* Player{GrabbedPlayer.Get()};
+	if (!Player) return;
+
+	const FVector From{GrabCamera->GetComponentLocation()};
+	GrabCamera->SetWorldRotation((Player->GetActorLocation() - From).Rotation());
+}
+
+void AMonsterCharacter::CalcCamera(const float DeltaTime, FMinimalViewInfo& OutResult)
+{
+	Super::CalcCamera(DeltaTime, OutResult);
+	if (GrabCamera && GrabCamera->IsActive()) OutResult.PerspectiveNearClipPlane = GrabCameraNearClip;
 }

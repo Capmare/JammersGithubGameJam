@@ -15,13 +15,13 @@
 #include "InputActionValue.h"
 #include "InputMappingContext.h"
 #include "PaintEffectComponent.h"
+#include "CotSHeartbeatComponent.h"
 #include "InteractableInterface.h"
 #include "PlayerInputDataAsset.h"
 #include "ThrowablePickup.h"
 #include "CotSMonsterDirector.h"
 #include "CotSObjectiveSubsystem.h"
 #include "MonsterCharacter.h"
-#include "PickedUpDouble.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "DrawDebugHelpers.h"
@@ -50,6 +50,7 @@ APlayerCharacter::APlayerCharacter()
 	PlayerCamera->bUsePawnControlRotation = false;
 
 	PaintEffect = CreateDefaultSubobject<UPaintEffectComponent>(TEXT("PaintEffect"));
+	Heartbeat = CreateDefaultSubobject<UCotSHeartbeatComponent>(TEXT("Heartbeat"));
 }
 
 void APlayerCharacter::BeginPlay()
@@ -81,7 +82,6 @@ void APlayerCharacter::Tick(float DeltaTime)
 	Super::Tick(DeltaTime);
 
 	UpdateStamina(DeltaTime);
-	UpdateHeartbeat(DeltaTime);
 	// Only X and Y change, so gravity still works
 	FVector& Velocity{GetCharacterMovement()->Velocity};
 	if (bAiming)
@@ -461,6 +461,8 @@ void APlayerCharacter::UpdateStamina(const float DeltaTime)
 {
 	const bool bRunningOutOfBreath{Stamina <= 0.f && FullyTiredTime > 0.f};
 	const bool bSprinting{bSprintHeld && CanSprint() && (bRunningOutOfBreath || !GetVelocity().IsNearlyZero())};
+	// The heart reads this value through IsRunning
+	bRunning = bSprinting;
 
 	if (bSprinting)
 	{
@@ -511,35 +513,22 @@ void APlayerCharacter::StartTiredPause()
 	TiredPauseEndTime = GetWorld()->GetTimeSeconds() + Pause;
 }
 
-void APlayerCharacter::UpdateHeartbeat(const float DeltaTime)
-{
-	if (!HeartbeatSound) return;
-
-	HeartbeatTimer -= DeltaTime;
-	if (HeartbeatTimer > 0.f) return;
-
-	const float StaminaStress{GetTiredness()};
-
-	float MonsterFear{};
-	if (const UCotSMonsterDirector* Director{UCotSMonsterDirector::Get(this)})
-	{
-		MonsterFear = 1.f - FMath::Clamp(Director->GetNearestMonsterDistance(GetActorLocation()) / MonsterFearDistance, 0.f, 1.f);
-	}
-
-	float Intensity{FMath::Max(StaminaStress, MonsterFear)};
-	if (bCalm) Intensity *= CalmIntensityScale;
-
-	UGameplayStatics::PlaySound2D(this, HeartbeatSound);
-	HeartbeatTimer = FMath::Lerp(SlowestBeatInterval, FastestBeatInterval, Intensity);
-}
-
 void APlayerCharacter::SetSoundWorld(const bool bSound)
 {
 	if (bPaintActive == bSound) return;
 
 	bPaintActive = bSound;
-	if (bPaintActive) PaintEffect->Start();
-	else PaintEffect->Reverse();
+	if (!IsValid(PaintEffect)) return;
+
+	if (!bPaintActive)
+	{
+		PaintEffect->Reverse();
+		return;
+	}
+
+	// The heart opens a ripple on each beat, so the sound world starts with the ripple of one beat.
+	if (IsValid(Heartbeat) && Heartbeat->bPulseReveal) PaintEffect->PulseRadius(Heartbeat->GetRevealRadius(), Heartbeat->GetBeatInterval());
+	else PaintEffect->Start();
 }
 
 void APlayerCharacter::DebugTogglePaint()
@@ -680,15 +669,6 @@ void APlayerCharacter::BeginPickedUp(AMonsterCharacter* Monster)
 	SetActorEnableCollision(false);
 	LogPickedUpTransforms(TEXT("before pickup"));
 
-	FActorSpawnParameters SpawnParameters{};
-	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	PickedUpDouble = GetWorld()->SpawnActor<APickedUpDouble>(APickedUpDouble::StaticClass(), GetActorTransform(), SpawnParameters);
-	if (PickedUpDouble)
-	{
-		PickedUpDouble->Initialize(this);
-		PickedUpDouble->BeginBlend(Monster->GetMesh(), Monster->GetHoldSocketName(), Monster->GetPlayerHoldTransform(), PickUpMoveSeconds);
-	}
-
 	SetActorLocation(Monster->GetHoldLocation(), false, nullptr, ETeleportType::TeleportPhysics);
 	SetActorRotation(FRotator{0.0, Monster->GetActorRotation().Yaw + 180.0, 0.0});
 
@@ -709,6 +689,9 @@ void APlayerCharacter::BeginPickedUp(AMonsterCharacter* Monster)
 
 	PlayPickedUpLoop();
 
+	GetWorldTimerManager().PauseTimer(WorldSwapTimer);
+	SetSoundWorld(true);
+
 	OnPickedUp.Broadcast(Monster);
 	OnStruggleStarted.Broadcast(StruggleTimeLimit);
 	OnStruggleProgressChanged.Broadcast(0.f);
@@ -722,16 +705,14 @@ void APlayerCharacter::EndPickedUp(const bool bEscaped)
 	AMonsterCharacter* Monster{PickedUpBy.Get()};
 	PickedUpBy.Reset();
 
+	SetSoundWorld(false);
+	GetWorldTimerManager().UnPauseTimer(WorldSwapTimer);
+
 	LogPickedUpTransforms(TEXT("before release"));
 	DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 	SetActorEnableCollision(true);
 
 	GetMesh()->VisibilityBasedAnimTickOption = SavedAnimTickOption;
-	if (IsValid(PickedUpDouble))
-	{
-		PickedUpDouble->Destroy();
-		PickedUpDouble = nullptr;
-	}
 
 	if (UAnimInstance* AnimInstance{GetMesh()->GetAnimInstance()})
 	{
@@ -851,14 +832,13 @@ void APlayerCharacter::LogPickedUpTransforms(const TCHAR* Label) const
 	const USkeletalMeshComponent* MonsterMesh{Monster ? Monster->GetMesh() : nullptr};
 	const FTransform Socket{MonsterMesh ? MonsterMesh->GetSocketTransform(Monster->GetHoldSocketName()) : FTransform::Identity};
 	const FTransform Actor{GetActorTransform()};
-	const FTransform Mesh{GetMesh()->GetComponentTransform()};
+	const FTransform MeshTransform{GetMesh()->GetComponentTransform()};
 
-	UE_LOG(LogCotS, Log, TEXT("Pickup %s | monster actor %s | player actor loc %s rot %s scale %s | player mesh scale %s rot %s | socket loc %s rot %s scale %s | monster mesh scale %s | double %s"),
+	UE_LOG(LogCotS, Log, TEXT("Pickup %s | monster actor %s | player actor loc %s rot %s scale %s | player mesh scale %s rot %s | socket loc %s rot %s scale %s | monster mesh scale %s"),
 		Label,
 		Monster ? *Monster->GetActorLocation().ToCompactString() : TEXT("none"),
 		*Actor.GetLocation().ToCompactString(), *Actor.Rotator().ToCompactString(), *Actor.GetScale3D().ToCompactString(),
-		*Mesh.GetScale3D().ToCompactString(), *Mesh.Rotator().ToCompactString(),
+		*MeshTransform.GetScale3D().ToCompactString(), *MeshTransform.Rotator().ToCompactString(),
 		*Socket.GetLocation().ToCompactString(), *Socket.Rotator().ToCompactString(), *Socket.GetScale3D().ToCompactString(),
-		MonsterMesh ? *MonsterMesh->GetComponentScale().ToCompactString() : TEXT("none"),
-		IsValid(PickedUpDouble) ? *PickedUpDouble->GetActorTransform().ToHumanReadableString() : TEXT("none"));
+		MonsterMesh ? *MonsterMesh->GetComponentScale().ToCompactString() : TEXT("none"));
 }

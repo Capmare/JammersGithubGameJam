@@ -18,6 +18,7 @@ public:
 	AMonsterCharacter();
 
 	virtual void Tick(float DeltaTime) override;
+	virtual void CalcCamera(float DeltaTime, FMinimalViewInfo& OutResult) override;
 
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "CotS")
 	bool IsDormant() const { return bDormant; }
@@ -132,6 +133,16 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CotS|Grab", meta = (ClampMin = "0"))
 	float GrabCameraBlendTime{0.5f};
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CotS|Grab")
+	FName GrabCameraSocketName{TEXT("HeadSocket")};
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CotS|Grab")
+	FVector GrabCameraOffset{FVector::ZeroVector};
+
+	// Near clip plane of the grab camera, in world units. Small values let it see geometry close to the lens
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CotS|Grab", meta = (ClampMin = "0.01"))
+	float GrabCameraNearClip{1.f};
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CotS|Grab", meta = (ClampMin = "0"))
 	float AttackGrabDistance{250.f};
 
@@ -149,6 +160,7 @@ private:
 	void EndStun();
 	void EndAttack(bool bResumeBehavior);
 	void StartFlee();
+	void UpdateGrabCamera();
 	bool FindFleeLocation(FVector& OutLocation) const;
 	void EndFlee();
 
