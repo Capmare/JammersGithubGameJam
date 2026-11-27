@@ -11,12 +11,12 @@ class UPlayerInputDataAsset;
 class UCameraComponent;
 class USpringArmComponent;
 class UPaintEffectComponent;
+class UCotSHeartbeatComponent;
 class UInputMappingContext;
 class USceneComponent;
 class USoundBase;
 class UAnimSequenceBase;
 class AMonsterCharacter;
-class APickedUpDouble;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCotSPickedUp, AMonsterCharacter*, Monster);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCotSStruggleStarted, float, TimeLimit);
@@ -57,6 +57,7 @@ public:
 	// Starts the sound world. The world then swaps back and forth at random times
 	void BeginWorldSwapping();
 
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "CotS|World")
 	bool IsInSoundWorld() const { return bPaintActive; }
 
 	void BeginPickedUp(AMonsterCharacter* Monster);
@@ -97,6 +98,14 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "CotS|Stamina")
 	float GetTiredness() const { return 1.f - FMath::Clamp(Stamina / MaxStamina, 0.f, 1.f); }
 
+	// True while the player sprints. The heart reads this value.
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "CotS|Stamina")
+	bool IsRunning() const { return bRunning; }
+
+	// True while the player holds the calm key.
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "CotS|Stamina")
+	bool IsCalming() const { return bCalm; }
+
 	// Keeps the aim offset inside the allowed box so the spine does not twist too far
 	virtual void OnStartCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust) override;
 	virtual void OnEndCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust) override;
@@ -133,7 +142,6 @@ private:
 	void UpdateStamina(float DeltaTime);
 	void StartTiredPause();
 	bool IsTiredPausing() const;
-	void UpdateHeartbeat(float DeltaTime);
 	bool CanSprint() const { return !bExhausted && !bCalm && !bIsCrouched; }
 	void SetSoundWorld(bool bSound);
 	void DebugTogglePaint();
@@ -183,14 +191,11 @@ private:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="1"), Category = "CotS|Grab")
 	float StruggleTimeLimit{10.f};
 
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0"), Category = "CotS|Grab")
-	float PickUpMoveSeconds{0.4f};
 
 	bool bPickedUp{};
 	float StruggleProgress{};
 	float StruggleTimeRemaining{};
 	TWeakObjectPtr<AMonsterCharacter> PickedUpBy{};
-	TObjectPtr<APickedUpDouble> PickedUpDouble{};
 	EVisibilityBasedAnimTickOption SavedAnimTickOption{};
 	float PickedUpLogTimer{};
 	void LogPickedUpTransforms(const TCHAR* Label) const;
@@ -309,6 +314,9 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta=(AllowPrivateAccess="true"), Category = "CotS")
 	TObjectPtr<UPaintEffectComponent> PaintEffect{};
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta=(AllowPrivateAccess="true"), Category = "CotS|Heartbeat")
+	TObjectPtr<UCotSHeartbeatComponent> Heartbeat{};
+
 	bool bPaintActive{};
 	bool bWorldSwapping{};
 	FTimerHandle WorldSwapTimer{};
@@ -323,8 +331,8 @@ private:
 	bool bSprintHeld{};
 	bool bCalm{};
 	bool bExhausted{};
+	bool bRunning{};
 	float Stamina{};
-	float HeartbeatTimer{};
 	
 	UPROPERTY(BlueprintReadWrite,EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS")
 	TObjectPtr<UCameraComponent> PlayerCamera{};
@@ -347,22 +355,6 @@ private:
 
 	UPROPERTY(BlueprintReadWrite,EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS")
 	bool ShowPickUpDebugRay{false};
-
-	// Plays once per beat. Use a single beat, not a loop.
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS|Heartbeat")
-	TObjectPtr<USoundBase> HeartbeatSound{};
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0.05"), Category = "CotS|Heartbeat")
-	float SlowestBeatInterval{1.2f};
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0.05"), Category = "CotS|Heartbeat")
-	float FastestBeatInterval{0.35f};
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="1"), Category = "CotS|Heartbeat")
-	float MonsterFearDistance{2500.f};
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0", ClampMax="1"), Category = "CotS|Heartbeat")
-	float CalmIntensityScale{0.3f};
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="1"), Category = "CotS|Stamina")
 	float MaxStamina{110.f};

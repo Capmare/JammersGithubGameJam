@@ -87,3 +87,6 @@ compile_commands.json
 **/Content/Developers/*
 **/Content/__ExternalActors__/Developers/
 **/Content/__ExternalObjects__/Developers/
+
+# Local editor tools, not shared
+ColorOfTheSilence/Plugins/CotSEditorTools/
