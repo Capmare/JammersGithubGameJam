@@ -87,6 +87,7 @@ void APlayerCharacter::Tick(float DeltaTime)
 	}
 	if (bAiming) UpdateAimPreview();
 	UpdateCrouchCamera(DeltaTime);
+	UpdateCrouchOrbit(DeltaTime);
 	UpdateAimZoom(DeltaTime);
 }
 
@@ -109,6 +110,24 @@ void APlayerCharacter::UpdateCrouchCamera(const float DeltaTime)
 	CameraBoom->TargetOffset = FVector{0.f, 0.f, CameraHeightOffset};
 }
 
+void APlayerCharacter::UpdateCrouchOrbit(const float DeltaTime)
+{
+	if (bIsCrouched) bCameraReturning = true;
+	else if (bCameraReturning)
+	{
+		if (AController* PlayerController{GetController()})
+		{
+			FRotator Control{PlayerController->GetControlRotation()};
+			Control.Yaw = FMath::FInterpTo(Control.Yaw, Control.Yaw + FRotator::NormalizeAxis(GetActorRotation().Yaw - Control.Yaw), DeltaTime, CrouchCameraReturnSpeed);
+			PlayerController->SetControlRotation(Control);
+			if (FMath::Abs(FRotator::NormalizeAxis(GetActorRotation().Yaw - Control.Yaw)) < 1.f) bCameraReturning = false;
+		}
+		else bCameraReturning = false;
+	}
+
+	bUseControllerRotationYaw = bAiming || !bCameraReturning;
+}
+
 void APlayerCharacter::UpdateAimZoom(const float DeltaTime)
 {
 	const float TargetFieldOfView{bAiming ? AimFieldOfView : DefaultFieldOfView};
@@ -118,15 +137,57 @@ void APlayerCharacter::UpdateAimZoom(const float DeltaTime)
 	CameraBoom->TargetArmLength = FMath::FInterpTo(CameraBoom->TargetArmLength, TargetArmLength, DeltaTime, AimZoomSpeed);
 }
 
-void APlayerCharacter::PlayCrouchAnim(const float Rate) const
+void APlayerCharacter::PlayCrouchAnim(const float Rate)
 {
-	if (!StandUpAnim) return;
+	StopCrouchIdle();
 
 	UAnimInstance* AnimInstance{GetMesh()->GetAnimInstance()};
-	if (!AnimInstance) return;
+	if (!StandUpAnim || !AnimInstance)
+	{
+		if (Rate < 0.f) StartCrouchIdle();
+		return;
+	}
 
-	const float StartTime{Rate < 0.f ? static_cast<float>(StandUpAnim->GetPlayLength()) : 0.f};
-	AnimInstance->Montage_Play(StandUpAnim, Rate, EMontagePlayReturnType::MontageLength, StartTime);
+	const float StartTime{Rate < 0.f ? FMath::Max(0.f, static_cast<float>(StandUpAnim->GetPlayLength()) - CrouchDownSkipSeconds) : 0.f};
+	if (Rate < 0.f)
+	{
+		AnimInstance->Montage_Play(StandUpAnim, Rate, EMontagePlayReturnType::MontageLength, StartTime);
+	}
+	else
+	{
+		StandUpEndTime = GetWorld()->GetTimeSeconds() + StandUpAnim->GetPlayLength() / Rate;
+		AnimInstance->Montage_PlayWithBlendSettings(StandUpAnim, FMontageBlendSettings{0.f}, Rate, EMontagePlayReturnType::MontageLength, StartTime);
+	}
+
+	if (Rate < 0.f)
+	{
+		FOnMontageBlendingOutStarted BlendOut{};
+		BlendOut.BindWeakLambda(this, [this](UAnimMontage*, const bool bInterrupted)
+		{
+			if (!bInterrupted && bIsCrouched) StartCrouchIdle();
+		});
+		AnimInstance->Montage_SetBlendingOutDelegate(BlendOut, StandUpAnim);
+	}
+}
+
+bool APlayerCharacter::IsStandingUp() const
+{
+	return GetWorld() && GetWorld()->GetTimeSeconds() < StandUpEndTime;
+}
+
+void APlayerCharacter::StartCrouchIdle()
+{
+	UAnimInstance* AnimInstance{GetMesh()->GetAnimInstance()};
+	if (!CrouchIdleAnim || !AnimInstance || !bIsCrouched) return;
+
+	CrouchIdleMontage = AnimInstance->PlaySlotAnimationAsDynamicMontage(CrouchIdleAnim, CrouchSlotName, 0.2f, 0.2f, 1.f, MAX_int32);
+}
+
+void APlayerCharacter::StopCrouchIdle()
+{
+	UAnimInstance* AnimInstance{GetMesh()->GetAnimInstance()};
+	if (CrouchIdleMontage && AnimInstance) AnimInstance->Montage_Stop(0.f, CrouchIdleMontage);
+	CrouchIdleMontage = nullptr;
 }
 
 void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -151,14 +212,16 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 	EnhancedInput->BindAction(InputReference->Aim, ETriggerEvent::Completed, this, &APlayerCharacter::CancelAim);
 	EnhancedInput->BindAction(InputReference->Aim, ETriggerEvent::Canceled, this, &APlayerCharacter::CancelAim);
 	EnhancedInput->BindAction(InputReference->Throw, ETriggerEvent::Started, this, &APlayerCharacter::ThrowHeldItem);
+	if (InputReference->Jump) EnhancedInput->BindAction(InputReference->Jump, ETriggerEvent::Started, this, &APlayerCharacter::StartJump);
 }
 
 void APlayerCharacter::ApplyMovementInput(const FInputActionValue& Value)
 {
-	if (bCalm || bAiming || IsTiredPausing()) return;
+	if (bCalm || bAiming || IsTiredPausing() || IsJumping() || IsStandingUp()) return;
 
 	const FVector2D Clamped{Value.Get<FVector2D>().GetClampedToMaxSize(1.0)};
-	if (!Clamped.IsNearlyZero()) ExitCrouch();
+	if (!Clamped.IsNearlyZero() && GetWorld()->GetTimeSeconds() - CrouchStartTime > CrouchMoveGraceSeconds) ExitCrouch();
+	if (IsStandingUp()) return;
 	AddMovementInput(GetActorForwardVector(), Clamped.Y);
 	AddMovementInput(GetActorRightVector(), Clamped.X);
 }
@@ -311,6 +374,7 @@ void APlayerCharacter::StopSprint()
 
 void APlayerCharacter::ToggleCrouch()
 {
+	if (IsStandingUp()) return;
 	if (bAiming) return;
 
 	if (bIsCrouched)
@@ -322,13 +386,38 @@ void APlayerCharacter::ToggleCrouch()
 	if (!CanCrouch()) return;
 
 	Crouch();
+	CrouchStartTime = GetWorld()->GetTimeSeconds();
 	ApplySpeed(WalkingSpeed);
 	PlayCrouchAnim(-CrouchAnimRate);
 }
 
+bool APlayerCharacter::IsJumping() const
+{
+	const UAnimInstance* AnimInstance{GetMesh()->GetAnimInstance()};
+	return JumpAnim && AnimInstance && AnimInstance->Montage_IsPlaying(JumpAnim);
+}
+
+void APlayerCharacter::StartJump()
+{
+	if (!JumpAnim || bAiming || bCalm || IsTiredPausing() || IsJumping()) return;
+	if (GetCharacterMovement()->IsFalling()) return;
+
+	if (bIsCrouched) ExitCrouch();
+	if (UAnimInstance* AnimInstance{GetMesh()->GetAnimInstance()})
+	{
+		AnimInstance->Montage_Play(JumpAnim);
+		const float Delay{static_cast<float>(JumpAnim->GetPlayLength()) * JumpImpulseFraction};
+		GetWorldTimerManager().SetTimer(JumpImpulseTimer, FTimerDelegate::CreateWeakLambda(this, [this]()
+		{
+			if (!IsJumping()) return;
+			LaunchCharacter(GetActorForwardVector() * JumpForwardImpulse + FVector{0.0, 0.0, static_cast<double>(JumpUpImpulse)}, false, false);
+		}), FMath::Max(Delay, KINDA_SMALL_NUMBER), false);
+	}
+}
+
 void APlayerCharacter::ExitCrouch()
 {
-	if (!bIsCrouched) return;
+	if (!bIsCrouched || !GetCharacterMovement()->bWantsToCrouch) return;
 
 	UnCrouch();
 	PlayCrouchAnim(CrouchAnimRate);
@@ -350,13 +439,21 @@ void APlayerCharacter::StopCalm()
 
 void APlayerCharacter::UpdateStamina(const float DeltaTime)
 {
-	const bool bSprinting{bSprintHeld && CanSprint() && !GetVelocity().IsNearlyZero()};
+	const bool bRunningOutOfBreath{Stamina <= 0.f && FullyTiredTime > 0.f};
+	const bool bSprinting{bSprintHeld && CanSprint() && (bRunningOutOfBreath || !GetVelocity().IsNearlyZero())};
 
 	if (bSprinting)
 	{
 		Stamina = FMath::Max(0.f, Stamina - StaminaDrainPerSecond * DeltaTime);
 		if (Stamina <= 0.f)
 		{
+			FullyTiredTime += DeltaTime;
+			const float Alpha{FMath::Clamp(FullyTiredTime / FMath::Max(FullyTiredSeconds, KINDA_SMALL_NUMBER), 0.f, 1.f)};
+			ApplySpeed(FMath::Lerp(SprintingSpeed, 0.f, Alpha));
+		}
+		if (FullyTiredTime >= FullyTiredSeconds)
+		{
+			FullyTiredTime = 0.f;
 			bExhausted = true;
 			ApplySpeed(WalkingSpeed);
 			StartTiredPause();
@@ -364,6 +461,7 @@ void APlayerCharacter::UpdateStamina(const float DeltaTime)
 		return;
 	}
 
+	FullyTiredTime = 0.f;
 	Stamina = FMath::Min(MaxStamina, Stamina + StaminaRegenPerSecond * (bCalm ? CalmRegenMultiplier : 1.f) * DeltaTime);
 	if (bExhausted && Stamina >= SprintResumeStamina)
 	{

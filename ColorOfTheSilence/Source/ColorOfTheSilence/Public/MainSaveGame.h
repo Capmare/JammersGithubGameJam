@@ -16,13 +16,13 @@ struct FInteractableObjectData
 	GENERATED_BODY()
 
 	UPROPERTY()
-	TSubclassOf<AActor> ObjectClass;
+	TSubclassOf<AActor> ObjectClass{};
 
 	UPROPERTY()
-	FVector Location;
+	FVector Location{};
 
 	UPROPERTY()
-	FRotator Rotation;
+	FRotator Rotation{};
 };
 
 UCLASS()
@@ -33,12 +33,12 @@ class COLOROFTHESILENCE_API UMainSaveGame : public USaveGame
 public:
 
 	UPROPERTY(VisibleAnywhere, Category = Monster)
-	FVector MonsterLocation;
+	FVector MonsterLocation{};
 
 	UPROPERTY(VisibleAnywhere, Category = Interaction)
-	TSubclassOf<AActor> CurrentlyHeldObjectClass;
+	TSubclassOf<AActor> CurrentlyHeldObjectClass{};
 
 	UPROPERTY(VisibleAnywhere, Category = Interaction)
-	TArray<FInteractableObjectData> InteractableObjects;
+	TArray<FInteractableObjectData> InteractableObjects{};
 
 };

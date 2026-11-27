@@ -47,5 +47,9 @@ public:
 	// Press to crouch or stand up
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "CotS")
 	TObjectPtr<UInputAction> Crouch{};
+
+	// Press to play the jump montage
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "CotS")
+	TObjectPtr<UInputAction> Jump{};
 	
 };

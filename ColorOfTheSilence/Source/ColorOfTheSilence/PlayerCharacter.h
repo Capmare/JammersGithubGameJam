@@ -14,6 +14,7 @@ class UPaintEffectComponent;
 class UInputMappingContext;
 class USceneComponent;
 class USoundBase;
+class UAnimSequenceBase;
 
 enum class EPlayerWalkingStatus
 {
@@ -71,9 +72,15 @@ private:
 	void StartSprint();
 	void StopSprint();
 	void UpdateCrouchCamera(float DeltaTime);
+	void UpdateCrouchOrbit(float DeltaTime);
 	void UpdateAimZoom(float DeltaTime);
-	void PlayCrouchAnim(float Rate) const;
+	void PlayCrouchAnim(float Rate);
+	void StartCrouchIdle();
+	bool IsStandingUp() const;
+	void StopCrouchIdle();
 	void ToggleCrouch();
+	void StartJump();
+	bool IsJumping() const;
 	void ExitCrouch();
 	void StartCalm();
 	void StopCalm();
@@ -110,13 +117,28 @@ private:
 	
 	UPROPERTY(BlueprintReadWrite,EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS")
 	TObjectPtr<UAnimMontage> PickupAnim{};
+
+	// Root motion montage. It moves the character, so no physics jump is used
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS|Jump")
+	TObjectPtr<UAnimMontage> JumpAnim{};
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0"), Category = "CotS|Jump")
+	float JumpUpImpulse{150.f};
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0"), Category = "CotS|Jump")
+	float JumpForwardImpulse{150.f};
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0", ClampMax="1"), Category = "CotS|Jump")
+	float JumpImpulseFraction{0.5f};
+
+	FTimerHandle JumpImpulseTimer;
 	
 	UPROPERTY(BlueprintReadWrite,EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS")
 	TObjectPtr<UAnimMontage> ThrowAnim{};
 
 	// Max turn left or right, in degrees, while the player aims
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0"), Category = "CotS")
-	float CrouchingSpeed{300.f};
+	float CrouchingSpeed{450.f};
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS|Crouch")
 	// Stand up animation. The player plays it backward to crouch
@@ -124,13 +146,38 @@ private:
 
 	// 1 is the montage speed. Lower is slower
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0.05"), Category = "CotS|Crouch")
-	float CrouchAnimRate{0.5f};
+	float CrouchAnimRate{1.f};
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0"), Category = "CotS|Crouch")
+	float CrouchDownSkipSeconds{0.1f};
+
+	// Loops while the player stays crouched
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS|Crouch")
+	TObjectPtr<UAnimSequenceBase> CrouchIdleAnim{};
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS|Crouch")
+	FName CrouchSlotName{TEXT("DefaultSlot")};
+
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimMontage> CrouchIdleMontage{};
 
 	// How fast the camera moves to the new height. Lower is slower
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0.1"), Category = "CotS|Crouch")
 	float CrouchCameraSpeed{3.f};
 
 	float CameraHeightOffset{};
+
+	bool bCameraReturning{};
+
+	float CrouchStartTime{-100.f};
+
+	double StandUpEndTime{};
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0"), Category = "CotS|Crouch")
+	float CrouchMoveGraceSeconds{0.4f};
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0.1"), Category = "CotS|Crouch")
+	float CrouchCameraReturnSpeed{5.f};
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0", ClampMax="90"), Category = "CotS|Throw")
 	float MaxAimYaw{30.f};
@@ -237,10 +284,16 @@ private:
 	float CalmIntensityScale{0.3f};
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="1"), Category = "CotS|Stamina")
-	float MaxStamina{100.f};
+	float MaxStamina{110.f};
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0"), Category = "CotS|Stamina")
 	float StaminaDrainPerSecond{25.f};
+
+	// Time the player can keep sprinting at zero stamina before the exhausted pause starts
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0"), Category = "CotS|Stamina")
+	float FullyTiredSeconds{5.f};
+
+	float FullyTiredTime{};
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0"), Category = "CotS|Stamina")
 	float StaminaRegenPerSecond{15.f};
