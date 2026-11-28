@@ -323,6 +323,13 @@ void UCotSObjectiveSubsystem::LogObjectiveState() const
 	}
 }
 
+void UCotSObjectiveSubsystem::SetCollectedKeyCount(int32 NewCount)
+{
+	CollectedKeys = NewCount;
+	UE_LOG(LogCotS, Log, TEXT("Collected key count set to: %d"), CollectedKeys);
+	OnKeyCollected.Broadcast(CollectedKeys, KeysRequired);
+}
+
 void UCotSObjectiveSubsystem::PruneDeadSpots()
 {
 	RegisteredSpots.RemoveAll([](const TWeakObjectPtr<AKeySpot>& WeakSpot) { return !WeakSpot.IsValid(); });

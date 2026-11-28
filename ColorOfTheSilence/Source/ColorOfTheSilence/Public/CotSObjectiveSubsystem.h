@@ -134,6 +134,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "CotS|Objective")
 	void LogObjectiveState() const;
 
+	UFUNCTION(BlueprintCallable, Category = "CotS|Objective")
+	void SetCollectedKeyCount(int32 NewCount);
+
 
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "CotS|Objective")
 	int32 GetCollectedKeyCount() const { return CollectedKeys; }

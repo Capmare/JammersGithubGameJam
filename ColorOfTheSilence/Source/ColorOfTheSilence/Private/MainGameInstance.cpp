@@ -9,6 +9,8 @@
 #include "PlayerCharacterInterface.h"
 #include "InteractableInterface.h"
 #include "GameFramework/Character.h"
+#include "MonsterCharacter.h"
+#include "CotSObjectiveSubsystem.h"
 
 
 UMainGameInstance::UMainGameInstance()
@@ -68,6 +70,9 @@ void UMainGameInstance::SaveGame(FString SaveSlotName)
 			}
 		}
 
+		SaveGameInstance->MonsterLocation = UGameplayStatics::GetActorOfClass(GetWorld(), AMonsterCharacter::StaticClass())->GetActorLocation();
+		SaveGameInstance->CollectedKeys = Cast<UCotSObjectiveSubsystem>(GetSubsystem<UCotSObjectiveSubsystem>())->GetCollectedKeyCount();
+
 		UGameplayStatics::AsyncSaveGameToSlot(SaveGameInstance, SaveSlotName, 0);
 	}
 }
@@ -112,5 +117,16 @@ void UMainGameInstance::OnGameLoaded(const FString& SlotName, const int32 UserIn
 		AActor* SpawnedHeldObject = GetWorld()->SpawnActor<AActor>(LoadedSaveGame->CurrentlyHeldObjectClass, FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
 		Cast<IPlayerCharacterInterface>(UGameplayStatics::GetPlayerCharacter(GetWorld(), 0))->PickUp(SpawnedHeldObject);
 	}
+
+	if (AMonsterCharacter* Monster = Cast<AMonsterCharacter>(UGameplayStatics::GetActorOfClass(GetWorld(), AMonsterCharacter::StaticClass())))
+	{
+		Monster->SetActorLocation(LoadedSaveGame->MonsterLocation);
+	}
+	
+	if (UCotSObjectiveSubsystem* ObjectiveSubsystem = Cast<UCotSObjectiveSubsystem>(GetSubsystem<UCotSObjectiveSubsystem>()))
+	{
+		ObjectiveSubsystem->SetCollectedKeyCount(LoadedSaveGame->CollectedKeys);
+	}
+
 }
 

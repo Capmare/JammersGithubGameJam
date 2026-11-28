@@ -19,10 +19,10 @@ struct FInteractableObjectData
 	TSubclassOf<AActor> ObjectClass{};
 
 	UPROPERTY()
-	FVector Location{};
+	FVector Location;
 
 	UPROPERTY()
-	FRotator Rotation{};
+	FRotator Rotation;
 };
 
 UCLASS()
@@ -40,5 +40,8 @@ public:
 
 	UPROPERTY(VisibleAnywhere, Category = Interaction)
 	TArray<FInteractableObjectData> InteractableObjects{};
+
+	UPROPERTY(VisibleAnywhere, Category = Keys)
+	int32 CollectedKeys{};
 
 };
