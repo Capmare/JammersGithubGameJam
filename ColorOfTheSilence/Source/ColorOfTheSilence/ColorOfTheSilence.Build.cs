@@ -8,7 +8,7 @@ public class ColorOfTheSilence : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 	
-		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "AIModule", "NavigationSystem", "GameplayTasks", "StateTreeModule", "GameplayStateTreeModule" });
+		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "AIModule", "NavigationSystem", "GameplayTasks", "StateTreeModule", "GameplayStateTreeModule", "SlateCore", "Slate", "UMG" });
 
 		PrivateDependencyModuleNames.AddRange(new string[] { "PhysicsCore" });
 

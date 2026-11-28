@@ -11,11 +11,13 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/InputDeviceSubsystem.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "InputActionValue.h"
 #include "InputMappingContext.h"
 #include "PaintEffectComponent.h"
 #include "CotSHeartbeatComponent.h"
+#include "CotSQTEPromptComponent.h"
 #include "InteractableInterface.h"
 #include "PlayerInputDataAsset.h"
 #include "ThrowablePickup.h"
@@ -51,12 +53,16 @@ APlayerCharacter::APlayerCharacter()
 
 	PaintEffect = CreateDefaultSubobject<UPaintEffectComponent>(TEXT("PaintEffect"));
 	Heartbeat = CreateDefaultSubobject<UCotSHeartbeatComponent>(TEXT("Heartbeat"));
+	QTEPrompts = CreateDefaultSubobject<UCotSQTEPromptComponent>(TEXT("QTEPrompts"));
 }
 
 void APlayerCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 
+	QTEPrompts->OnPromptHit.AddUObject(this, &APlayerCharacter::Struggle);
+	QTEPrompts->OnFailLimitReached.AddUObject(this, &APlayerCharacter::FailStruggle);
+	QTEPrompts->OnPromptMissed.AddWeakLambda(this, [this](const int32 Fails, const int32 FailLimit) { OnQTEMissed.Broadcast(Fails, FailLimit); });
 	GetCharacterMovement()->MaxWalkSpeedCrouched = CrouchingSpeed;
 	DefaultFieldOfView = PlayerCamera->FieldOfView;
 	DefaultArmLength = CameraBoom->TargetArmLength;
@@ -99,6 +105,7 @@ void APlayerCharacter::Tick(float DeltaTime)
 	UpdateCrouchCamera(DeltaTime);
 	if (bPickedUp) UpdateStruggle(DeltaTime);
 	UpdateCrouchOrbit(DeltaTime);
+	UpdateCrouchIdle();
 	UpdateAimZoom(DeltaTime);
 }
 
@@ -188,10 +195,10 @@ bool APlayerCharacter::IsStandingUp() const
 
 void APlayerCharacter::StartCrouchIdle()
 {
-	UAnimInstance* AnimInstance{GetMesh()->GetAnimInstance()};
-	if (!CrouchIdleAnim || !AnimInstance || !bIsCrouched) return;
+	if (!bIsCrouched) return;
 
-	CrouchIdleMontage = AnimInstance->PlaySlotAnimationAsDynamicMontage(CrouchIdleAnim, CrouchSlotName, 0.2f, 0.2f, 1.f, MAX_int32);
+	bCrouchIdleActive = true;
+	PlayCrouchIdle(GetWantedCrouchIdle(), 0.2f);
 }
 
 void APlayerCharacter::StopCrouchIdle()
@@ -199,6 +206,33 @@ void APlayerCharacter::StopCrouchIdle()
 	UAnimInstance* AnimInstance{GetMesh()->GetAnimInstance()};
 	if (CrouchIdleMontage && AnimInstance) AnimInstance->Montage_Stop(0.f, CrouchIdleMontage);
 	CrouchIdleMontage = nullptr;
+	CrouchIdlePlaying = nullptr;
+	bCrouchIdleActive = false;
+}
+
+void APlayerCharacter::UpdateCrouchIdle()
+{
+	const float Stress{IsValid(Heartbeat) ? Heartbeat->GetStress() : 0.f};
+	bCrouchScared = Stress >= (bCrouchScared ? CrouchScaredStress - CrouchScaredMargin : CrouchScaredStress);
+
+	if (!bCrouchIdleActive || !bIsCrouched) return;
+	if (UAnimSequenceBase* Wanted{GetWantedCrouchIdle()}; Wanted != CrouchIdlePlaying) PlayCrouchIdle(Wanted, CrouchIdleSwapBlendSeconds);
+}
+
+// A null Anim stops the slot montage, so the Anim Blueprint crouch pose shows again
+void APlayerCharacter::PlayCrouchIdle(UAnimSequenceBase* Anim, const float BlendSeconds)
+{
+	UAnimInstance* AnimInstance{GetMesh()->GetAnimInstance()};
+	if (!AnimInstance) return;
+
+	if (CrouchIdleMontage) AnimInstance->Montage_Stop(BlendSeconds, CrouchIdleMontage);
+	CrouchIdleMontage = Anim ? AnimInstance->PlaySlotAnimationAsDynamicMontage(Anim, CrouchSlotName, BlendSeconds, BlendSeconds, 1.f, MAX_int32) : nullptr;
+	CrouchIdlePlaying = Anim;
+}
+
+UAnimSequenceBase* APlayerCharacter::GetWantedCrouchIdle() const
+{
+	return bCrouchScared && CrouchScaredIdleAnim ? CrouchScaredIdleAnim.Get() : CrouchIdleAnim.Get();
 }
 
 void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -223,7 +257,6 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 	EnhancedInput->BindAction(InputReference->Aim, ETriggerEvent::Completed, this, &APlayerCharacter::CancelAim);
 	EnhancedInput->BindAction(InputReference->Aim, ETriggerEvent::Canceled, this, &APlayerCharacter::CancelAim);
 	EnhancedInput->BindAction(InputReference->Throw, ETriggerEvent::Started, this, &APlayerCharacter::ThrowHeldItem);
-	if (InputReference->Struggle) EnhancedInput->BindAction(InputReference->Struggle, ETriggerEvent::Started, this, &APlayerCharacter::Struggle);
 	if (InputReference->Jump) EnhancedInput->BindAction(InputReference->Jump, ETriggerEvent::Started, this, &APlayerCharacter::StartJump);
 }
 
@@ -239,12 +272,22 @@ void APlayerCharacter::ApplyMovementInput(const FInputActionValue& Value)
 	AddMovementInput(GetActorRightVector(), Clamped.X);
 }
 
+bool APlayerCharacter::IsUsingGamepad() const
+{
+	const APlayerController* PlayerController{Cast<APlayerController>(GetController())};
+	const UInputDeviceSubsystem* Devices{UInputDeviceSubsystem::Get()};
+	if (!PlayerController || !Devices) return false;
+
+	return Devices->GetMostRecentlyUsedHardwareDevice(PlayerController->GetPlatformUserId()).PrimaryDeviceType == EHardwareDevicePrimaryType::Gamepad;
+}
+
 void APlayerCharacter::ApplyLookInput(const FInputActionValue& Value)
 {
 	if (bPickedUp) return;
 	if (IsTiredPausing()) return;
 
-	const FVector2D Look{Value.Get<FVector2D>()};
+	FVector2D Look{Value.Get<FVector2D>()};
+	if (bInvertGamepadPitch && IsUsingGamepad()) Look.Y = -Look.Y;
 
 	if (bAiming)
 	{
@@ -694,6 +737,7 @@ void APlayerCharacter::BeginPickedUp(AMonsterCharacter* Monster)
 
 	OnPickedUp.Broadcast(Monster);
 	OnStruggleStarted.Broadcast(StruggleTimeLimit);
+	QTEPrompts->StartPrompts(QTEButtonData, QTEPromptWidgetClass, QTEDifficulty);
 	OnStruggleProgressChanged.Broadcast(0.f);
 }
 
@@ -702,6 +746,7 @@ void APlayerCharacter::EndPickedUp(const bool bEscaped)
 	if (!bPickedUp) return;
 
 	bPickedUp = false;
+	QTEPrompts->StopPrompts();
 	AMonsterCharacter* Monster{PickedUpBy.Get()};
 	PickedUpBy.Reset();
 
@@ -752,11 +797,11 @@ void APlayerCharacter::Struggle()
 {
 	if (!bPickedUp) return;
 
-	StruggleProgress = FMath::Clamp(StruggleProgress + StruggleProgressPerPress, 0.f, 1.f);
+	StruggleProgress = FMath::Clamp(StruggleProgress + QTEPrompts->GetProgressPerHit(), 0.f, 1.f);
 	OnStrugglePressed.Broadcast();
 	OnStruggleProgressChanged.Broadcast(StruggleProgress);
 
-	if (StruggleProgress >= 1.f)
+	if (StruggleProgress >= 1.f - KINDA_SMALL_NUMBER)
 	{
 		EndPickedUp(true);
 		return;
@@ -774,6 +819,14 @@ void APlayerCharacter::Struggle()
 	AnimInstance->Montage_SetEndDelegate(EndDelegate, HittingPickedUpAnim);
 }
 
+void APlayerCharacter::FailStruggle()
+{
+	StruggleTimeRemaining = 0.f;
+	QTEPrompts->StopPrompts();
+	OnCaptureFailed.Broadcast();
+	if (UCotSObjectiveSubsystem* Objectives{UCotSObjectiveSubsystem::Get(this)}) Objectives->ReportPlayerCaught();
+}
+
 void APlayerCharacter::UpdateStruggle(const float DeltaTime)
 {
 	if (const AMonsterCharacter* Holder{PickedUpBy.Get()})
@@ -788,23 +841,20 @@ void APlayerCharacter::UpdateStruggle(const float DeltaTime)
 		LogPickedUpTransforms(TEXT("holding"));
 	}
 
+	DrainStruggle(DeltaTime);
 	if (StruggleTimeRemaining <= 0.f) return;
 
 	StruggleTimeRemaining -= DeltaTime;
-	if (StruggleTimeRemaining <= 0.f)
-	{
-		StruggleTimeRemaining = 0.f;
-		OnCaptureFailed.Broadcast();
-		if (UCotSObjectiveSubsystem* Objectives{UCotSObjectiveSubsystem::Get(this)}) Objectives->ReportPlayerCaught();
-		return;
-	}
+	if (StruggleTimeRemaining <= 0.f) FailStruggle();
+}
 
-	const float Decayed{FMath::Max(0.f, StruggleProgress - StruggleDecayPerSecond * DeltaTime)};
-	if (!FMath::IsNearlyEqual(Decayed, StruggleProgress))
-	{
-		StruggleProgress = Decayed;
-		OnStruggleProgressChanged.Broadcast(StruggleProgress);
-	}
+void APlayerCharacter::DrainStruggle(const float DeltaTime)
+{
+	const float Drained{FMath::Max(0.f, StruggleProgress - QTEPrompts->GetDrainPerSecond() * DeltaTime)};
+	if (FMath::IsNearlyEqual(Drained, StruggleProgress)) return;
+
+	StruggleProgress = Drained;
+	OnStruggleProgressChanged.Broadcast(StruggleProgress);
 }
 
 void APlayerCharacter::PlayPickedUpLoop()

@@ -92,6 +92,7 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CotS|Grab", meta = (ClampMin = "0"))
 	float StalkTurnSpeed{180.f};
 
+	// Flat distance, so the height gap of a crouched player does not count
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CotS|Grab", meta = (ClampMin = "0"))
 	float AttackLungeDistance{450.f};
 

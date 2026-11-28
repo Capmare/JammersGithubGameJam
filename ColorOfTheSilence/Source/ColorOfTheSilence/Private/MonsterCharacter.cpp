@@ -334,7 +334,7 @@ void AMonsterCharacter::Tick(const float DeltaTime)
 		return;
 	}
 
-	if (FVector::Dist(GetActorLocation(), Player->GetActorLocation()) <= AttackLungeDistance)
+	if (FVector::Dist2D(GetActorLocation(), Player->GetActorLocation()) <= AttackLungeDistance)
 	{
 		GrabPlayer(Player);
 		return;

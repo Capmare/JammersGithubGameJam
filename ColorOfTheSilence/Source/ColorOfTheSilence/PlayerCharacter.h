@@ -2,6 +2,7 @@
 
 #pragma once
 #include "CoreMinimal.h"
+#include "CotSDifficulty.h"
 #include "GameFramework/Character.h"
 #include "PlayerCharacterInterface.h"
 #include "PlayerCharacter.generated.h"
@@ -12,6 +13,9 @@ class UCameraComponent;
 class USpringArmComponent;
 class UPaintEffectComponent;
 class UCotSHeartbeatComponent;
+class UCotSQTEPromptComponent;
+class UCotSButtonPromptWidget;
+class UUIButtonDataAsset;
 class UInputMappingContext;
 class USceneComponent;
 class USoundBase;
@@ -24,6 +28,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCotSStruggleProgress, float, Prog
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnCotSStrugglePressed);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnCotSEscaped);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnCotSCaptureFailed);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnCotSQTEMissed, int32, Fails, int32, FailLimit);
 
 enum class EPlayerWalkingStatus
 {
@@ -94,6 +99,10 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "CotS|Grab|Events")
 	FOnCotSCaptureFailed OnCaptureFailed;
 
+	// Fires for each missed QTE prompt. Use it to show the misses in the UI
+	UPROPERTY(BlueprintAssignable, Category = "CotS|Grab|Events")
+	FOnCotSQTEMissed OnQTEMissed;
+
 	// 0 is fully rested. 1 is fully exhausted.
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "CotS|Stamina")
 	float GetTiredness() const { return 1.f - FMath::Clamp(Stamina / MaxStamina, 0.f, 1.f); }
@@ -114,6 +123,10 @@ public:
 
 	bool IsAiming() const { return bAiming; }
 
+	// True while the heart stress is high enough for the scared crouch idle
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "CotS|Crouch")
+	bool IsCrouchScared() const { return bCrouchScared; }
+
 	// Fires when aiming starts or stops. Use it to show or hide a crosshair widget
 	UFUNCTION(BlueprintImplementableEvent, Category = "CotS|Throw")
 	void OnAimChanged(bool bNowAiming);
@@ -130,10 +143,15 @@ private:
 	void StartCrouchIdle();
 	bool IsStandingUp() const;
 	void StopCrouchIdle();
+	void UpdateCrouchIdle();
+	void PlayCrouchIdle(UAnimSequenceBase* Anim, float BlendSeconds);
+	UAnimSequenceBase* GetWantedCrouchIdle() const;
 	void ToggleCrouch();
 	void StartJump();
 	void Struggle();
 	void UpdateStruggle(float DeltaTime);
+	void FailStruggle();
+	void DrainStruggle(float DeltaTime);
 	void PlayPickedUpLoop();
 	bool IsJumping() const;
 	void ExitCrouch();
@@ -142,6 +160,7 @@ private:
 	void UpdateStamina(float DeltaTime);
 	void StartTiredPause();
 	bool IsTiredPausing() const;
+	bool IsUsingGamepad() const;
 	bool CanSprint() const { return !bExhausted && !bCalm && !bIsCrouched; }
 	void SetSoundWorld(bool bSound);
 	void DebugTogglePaint();
@@ -182,14 +201,9 @@ private:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS|Grab")
 	TObjectPtr<UAnimMontage> HittingPickedUpAnim{};
 
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0.01", ClampMax="1"), Category = "CotS|Grab")
-	float StruggleProgressPerPress{0.1f};
-
+	// 0 turns the time limit off, so only the QTE misses can end the game
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0"), Category = "CotS|Grab")
-	float StruggleDecayPerSecond{0.15f};
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="1"), Category = "CotS|Grab")
-	float StruggleTimeLimit{10.f};
+	float StruggleTimeLimit{0.f};
 
 
 	bool bPickedUp{};
@@ -236,8 +250,30 @@ private:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS|Crouch")
 	FName CrouchSlotName{TEXT("DefaultSlot")};
 
+	// Loops instead of CrouchIdleAnim while the heart stress is at CrouchScaredStress or higher
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS|Crouch")
+	TObjectPtr<UAnimSequenceBase> CrouchScaredIdleAnim{};
+
+	// 0.8 is 80% of the full heart stress
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0", ClampMax="1"), Category = "CotS|Crouch")
+	float CrouchScaredStress{0.8f};
+
+	// The scared idle stops only below CrouchScaredStress minus this value, so it does not flicker
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0", ClampMax="1"), Category = "CotS|Crouch")
+	float CrouchScaredMargin{0.05f};
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0"), Category = "CotS|Crouch")
+	float CrouchIdleSwapBlendSeconds{0.3f};
+
 	UPROPERTY(Transient)
 	TObjectPtr<UAnimMontage> CrouchIdleMontage{};
+
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimSequenceBase> CrouchIdlePlaying{};
+
+	bool bCrouchIdleActive{};
+
+	bool bCrouchScared{};
 
 	// How fast the camera moves to the new height. Lower is slower
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0.1"), Category = "CotS|Crouch")
@@ -252,6 +288,10 @@ private:
 	// Highest camera angle, in degrees. A positive value looks up
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true", ClampMin="0", ClampMax="89"), Category = "CotS|Camera")
 	float MaxCameraPitch{40.f};
+
+	// Flips the up and down look for a gamepad only. The mouse stays the same
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(AllowPrivateAccess="true"), Category = "CotS|Camera")
+	bool bInvertGamepadPitch{true};
 
 	bool bCameraReturning{};
 
@@ -316,6 +356,20 @@ private:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta=(AllowPrivateAccess="true"), Category = "CotS|Heartbeat")
 	TObjectPtr<UCotSHeartbeatComponent> Heartbeat{};
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta=(AllowPrivateAccess="true"), Category = "CotS|QTE")
+	TObjectPtr<UCotSQTEPromptComponent> QTEPrompts{};
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(AllowPrivateAccess="true"), Category = "CotS|QTE")
+	TObjectPtr<UUIButtonDataAsset> QTEButtonData{};
+
+	// Use WBP_NeutralToPressed after you set its parent class to CotSButtonPromptWidget
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(AllowPrivateAccess="true"), Category = "CotS|QTE")
+	TSubclassOf<UCotSButtonPromptWidget> QTEPromptWidgetClass{};
+
+	// Used when no menu has set a difficulty, for example when you play a level directly in the editor
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(AllowPrivateAccess="true"), Category = "CotS|QTE")
+	ECotSDifficulty QTEDifficulty{ECotSDifficulty::Normal};
 
 	bool bPaintActive{};
 	bool bWorldSwapping{};

@@ -51,9 +51,5 @@ public:
 	// Press to play the jump montage
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "CotS")
 	TObjectPtr<UInputAction> Jump{};
-
-	// Smash it to escape the monster
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "CotS")
-	TObjectPtr<UInputAction> Struggle{};
 	
 };
