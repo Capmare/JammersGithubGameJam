@@ -22,7 +22,7 @@ namespace
 {
 	constexpr double SoundDrawSeconds{3.0};
 #if ENABLE_DRAW_DEBUG
-	TAutoConsoleVariable<int32> CVarCotSDebug(TEXT("cots.debug"), 1, TEXT("Draws the hints, sounds, path and target of the monster. 0 turns it off."), ECVF_Cheat);
+	TAutoConsoleVariable<int32> CVarCotSDebug(TEXT("cots.debug"), 0, TEXT("Draws the hints, sounds, path and target of the monster. 1 turns it on."), ECVF_Cheat);
 #endif
 }
 
